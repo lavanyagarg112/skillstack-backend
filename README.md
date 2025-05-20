@@ -1,1 +1,1 @@
-THis is the backend for skillstack platform
+This is the backend for skillstack platform.
