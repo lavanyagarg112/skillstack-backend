@@ -1,0 +1,26 @@
+{
+  "name": "skillstack-backend",
+  "version": "1.0.0",
+  "description": "backend for skillstack",
+  "homepage": "https://github.com/lavanyagarg112/skillstack-backend#readme",
+  "bugs": {
+    "url": "https://github.com/lavanyagarg112/skillstack-backend/issues"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/lavanyagarg112/skillstack-backend.git"
+  },
+  "license": "ISC",
+  "author": "lavanyagarg",
+  "type": "commonjs",
+  "main": "server.js",
+  "scripts": {
+    "test": "jest"
+  },
+  "devDependencies": {
+    "jest": "^29.7.0"
+  },
+  "dependencies": {
+    "express": "^5.1.0"
+  }
+}
