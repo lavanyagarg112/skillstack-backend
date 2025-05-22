@@ -58,6 +58,55 @@ router.post("/", async (req, res) => {
   }
 });
 
+router.post("/addemployee", async (req, res) => {
+  const { auth } = req.cookies;
+  if (!auth) return res.status(401).json({ message: "Not authenticated" });
+
+  let session;
+  try {
+    session = JSON.parse(auth);
+  } catch {
+    return res.status(400).json({ message: "Invalid session data" });
+  }
+
+  const userId = session.userId;
+  const { organisationName } = req.body;
+  if (!organisationName) {
+    return res.status(400).json({ message: "organisationName is required" });
+  }
+
+  const client = await pool.connect();
+  try {
+    await client.query("BEGIN");
+
+    // 1) See if org exists
+    const orgRes = await client.query(
+      `SELECT id, organisation_name FROM organisations WHERE organisation_name = $1`,
+      [organisationName]
+    );
+    if (!orgRes.rows) {
+      return res.status(400).json({ message: "Organization not found" });
+    }
+    const org = orgRes.rows[0];
+
+    // 2) Link user → new org as employee
+    await client.query(
+      `INSERT INTO organisation_users (user_id, organisation_id, role)
+       VALUES ($1, $2, 'employee')`,
+      [userId, org.id]
+    );
+
+    await client.query("COMMIT");
+    return res.status(201).json({ organisation: { ...org, role: "employee" } });
+  } catch (err) {
+    await client.query("ROLLBACK");
+    console.error(err);
+    return res.status(500).json({ message: "Server error" });
+  } finally {
+    client.release();
+  }
+});
+
 // Get the single organization (and role) for the current user
 router.get("/my", async (req, res) => {
   const { auth } = req.cookies;
