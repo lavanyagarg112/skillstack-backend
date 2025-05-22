@@ -33,6 +33,7 @@ router.post("/signup", async (req, res) => {
       lastname: user.lastname,
       isLoggedIn: true,
       hasCompletedOnboarding: false,
+      organisation: null,
     });
     return res.status(201).json({ success: true });
   } catch (err) {
@@ -60,6 +61,19 @@ router.post("/login", async (req, res) => {
       return res.status(401).json({ message: "Invalid credentials" });
     }
     const u = rows[0];
+    const mem = await pool.query(
+      `SELECT
+     o.id                    AS id,
+     o.organisation_name     AS organisationName,
+     ou.role                 AS role
+   FROM organisation_users ou
+   JOIN organisations o
+     ON o.id = ou.organisation_id
+   WHERE ou.user_id = $1`,
+      [u.id]
+    );
+
+    const organisation = mem.rows[0] || null;
     setAuthCookie(res, {
       userId: u.id,
       email,
@@ -67,6 +81,7 @@ router.post("/login", async (req, res) => {
       lastname: u.lastname,
       isLoggedIn: true,
       hasCompletedOnboarding: u.has_completed_onboarding,
+      organisation,
     });
     return res.json({ success: true });
   } catch (err) {
@@ -108,10 +123,25 @@ router.post("/complete-onboarding", async (req, res) => {
       [user.userId]
     );
 
+    const mem = await pool.query(
+      `SELECT
+     o.id                    AS id,
+     o.organisation_name     AS organisationName,
+     ou.role                 AS role
+   FROM organisation_users ou
+   JOIN organisations o
+     ON o.id = ou.organisation_id
+   WHERE ou.user_id = $1`,
+      [user.userId]
+    );
+
+    const organisation = mem.rows[0] || null;
+
     // Regenerate auth cookie
     setAuthCookie(res, {
       ...user,
       hasCompletedOnboarding: true,
+      organisation: organisation,
     });
 
     res.json({ success: true });
