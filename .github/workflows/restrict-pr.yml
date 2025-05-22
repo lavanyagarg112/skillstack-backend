@@ -1,16 +1,16 @@
-name: Restrict PRs to Deployment Branch
+name: Restrict PRs to Main Branch
 
 on:
   pull_request:
     branches:
-      - deployment
+      - main
 
 jobs:
   restrict-pr:
     runs-on: ubuntu-latest
     steps:
       - name: Check PR Base Branch
-        if: github.event.pull_request.head.ref != 'main'
+        if: github.event.pull_request.head.ref != 'workingbranch'
         run: |
-          echo "PR can only be created from 'main' to 'deployment'."
+          echo "PR can only be created from 'workingbranch' to 'main'."
           exit 1
