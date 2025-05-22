@@ -11,7 +11,7 @@ CREATE TABLE users (
   has_completed_onboarding  BOOLEAN         NOT NULL DEFAULT FALSE
 );
 
--- 2. ORGANISATIONS (extended)
+-- 2. ORGANISATIONS
 CREATE TABLE organisations (
   id                  SERIAL PRIMARY KEY,
   organisation_name   VARCHAR(100)    NOT NULL UNIQUE,
@@ -20,7 +20,7 @@ CREATE TABLE organisations (
   created_at          TIMESTAMPTZ     NOT NULL DEFAULT now()
 );
 
--- 3. ORGANISATION_USERS (many-to-many with role)
+-- 3. ORGANISATION_USERS
 CREATE TABLE organisation_users (
   user_id         INTEGER      NOT NULL
     REFERENCES users(id) ON DELETE CASCADE,
@@ -63,7 +63,7 @@ CREATE TABLE modules (
   course_id     INTEGER    NOT NULL
     REFERENCES courses(id) ON DELETE CASCADE,
   title         VARCHAR(255) NOT NULL,
-  module_type   VARCHAR(50)  NOT NULL,    -- e.g. 'video', 'quiz-block'
+  module_type   VARCHAR(50)  NOT NULL,    -- e.g. 'video', 'quiz', 'pdf'
   description   TEXT,
   position      INTEGER      NOT NULL DEFAULT 0
 );
@@ -84,7 +84,7 @@ CREATE TABLE materials (
   revision_id   INTEGER    NOT NULL
     REFERENCES revisions(id) ON DELETE CASCADE,
   type          VARCHAR(50) NOT NULL,     -- 'video','pdf','slide',...
-  file_url      TEXT        NOT NULL,     -- your S3/Cloud URL
+  file_url      TEXT        NOT NULL,     -- S3/Cloud URL
   uploaded_by   INTEGER
     REFERENCES users(id) ON DELETE SET NULL,
   upload_date   TIMESTAMPTZ NOT NULL DEFAULT now(),
@@ -112,7 +112,7 @@ CREATE TABLE quizzes (
   revision_id INTEGER    NOT NULL
     REFERENCES revisions(id) ON DELETE CASCADE,
   title       VARCHAR(255) NOT NULL,
-  quiz_type   VARCHAR(50)  NOT NULL,  -- 'quiz' vs 'survey'
+  quiz_type   VARCHAR(50)  NOT NULL, -- 'graded', 'ungraded', 'practice'
   created_at  TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
@@ -152,12 +152,12 @@ CREATE TABLE quiz_answers (
     REFERENCES questions(id) ON DELETE CASCADE,
   selected_option_id INTEGER
     REFERENCES question_options(id) ON DELETE SET NULL,
-  answer_text        TEXT,              -- for text/short_answer
+  answer_text        TEXT,
   UNIQUE(response_id, question_id)
 );
 
 
--- 8. TAGS & MANY-TO-MANY
+-- 8. TAGS
 CREATE TABLE tags (
   id   SERIAL PRIMARY KEY,
   name VARCHAR(50) NOT NULL UNIQUE
