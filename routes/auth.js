@@ -32,6 +32,7 @@ router.post("/signup", async (req, res) => {
       firstname: user.firstname,
       lastname: user.lastname,
       isLoggedIn: true,
+      hasCompletedOnboarding: false,
     });
     return res.status(201).json({ success: true });
   } catch (err) {
@@ -48,7 +49,7 @@ router.post("/login", async (req, res) => {
   const { email, password } = req.body;
   try {
     const { rows } = await pool.query(
-      `SELECT id, password_hash, firstname, lastname
+      `SELECT id, password_hash, firstname, lastname, has_completed_onboarding
        FROM users WHERE email = $1`,
       [email]
     );
@@ -65,6 +66,7 @@ router.post("/login", async (req, res) => {
       firstname: u.firstname,
       lastname: u.lastname,
       isLoggedIn: true,
+      hasCompletedOnboarding: u.has_completed_onboarding,
     });
     return res.json({ success: true });
   } catch (err) {
@@ -86,6 +88,36 @@ router.get("/me", (req, res) => {
     return res.json(JSON.parse(auth));
   } catch {
     return res.json({ isLoggedIn: false });
+  }
+});
+
+router.post("/complete-onboarding", async (req, res) => {
+  const { auth } = req.cookies;
+  if (!auth) return res.status(401).json({ message: "Not logged in" });
+
+  let user;
+  try {
+    user = JSON.parse(auth);
+  } catch {
+    return res.status(400).json({ message: "Bad session" });
+  }
+
+  try {
+    await pool.query(
+      `UPDATE users SET has_completed_onboarding = true WHERE id = $1`,
+      [user.userId]
+    );
+
+    // Regenerate auth cookie
+    setAuthCookie(res, {
+      ...user,
+      hasCompletedOnboarding: true,
+    });
+
+    res.json({ success: true });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ message: "Server error" });
   }
 });
 
