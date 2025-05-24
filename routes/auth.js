@@ -15,7 +15,7 @@ function setAuthCookie(res, payload) {
 
 // SIGN UP → POST /api/signup
 router.post("/signup", async (req, res) => {
-  const { email, password, firstname = "", lastname = "" } = req.body;
+  const { email, password, firstname, lastname } = req.body;
   try {
     const hash = await bcrypt.hash(password, 10);
     const result = await pool.query(
@@ -32,6 +32,8 @@ router.post("/signup", async (req, res) => {
       firstname: user.firstname,
       lastname: user.lastname,
       isLoggedIn: true,
+      hasCompletedOnboarding: false,
+      organisation: null,
     });
     return res.status(201).json({ success: true });
   } catch (err) {
@@ -48,7 +50,7 @@ router.post("/login", async (req, res) => {
   const { email, password } = req.body;
   try {
     const { rows } = await pool.query(
-      `SELECT id, password_hash, firstname, lastname
+      `SELECT id, password_hash, firstname, lastname, has_completed_onboarding
        FROM users WHERE email = $1`,
       [email]
     );
@@ -59,12 +61,27 @@ router.post("/login", async (req, res) => {
       return res.status(401).json({ message: "Invalid credentials" });
     }
     const u = rows[0];
+    const mem = await pool.query(
+      `SELECT
+     o.id                    AS id,
+     o.organisation_name     AS organisationName,
+     ou.role                 AS role
+   FROM organisation_users ou
+   JOIN organisations o
+     ON o.id = ou.organisation_id
+   WHERE ou.user_id = $1`,
+      [u.id]
+    );
+
+    const organisation = mem.rows[0] || null;
     setAuthCookie(res, {
       userId: u.id,
       email,
       firstname: u.firstname,
       lastname: u.lastname,
       isLoggedIn: true,
+      hasCompletedOnboarding: u.has_completed_onboarding,
+      organisation,
     });
     return res.json({ success: true });
   } catch (err) {
@@ -86,6 +103,51 @@ router.get("/me", (req, res) => {
     return res.json(JSON.parse(auth));
   } catch {
     return res.json({ isLoggedIn: false });
+  }
+});
+
+router.post("/complete-onboarding", async (req, res) => {
+  const { auth } = req.cookies;
+  if (!auth) return res.status(401).json({ message: "Not logged in" });
+
+  let user;
+  try {
+    user = JSON.parse(auth);
+  } catch {
+    return res.status(400).json({ message: "Bad session" });
+  }
+
+  try {
+    await pool.query(
+      `UPDATE users SET has_completed_onboarding = true WHERE id = $1`,
+      [user.userId]
+    );
+
+    const mem = await pool.query(
+      `SELECT
+     o.id                    AS id,
+     o.organisation_name     AS organisationName,
+     ou.role                 AS role
+   FROM organisation_users ou
+   JOIN organisations o
+     ON o.id = ou.organisation_id
+   WHERE ou.user_id = $1`,
+      [user.userId]
+    );
+
+    const organisation = mem.rows[0] || null;
+
+    // Regenerate auth cookie
+    setAuthCookie(res, {
+      ...user,
+      hasCompletedOnboarding: true,
+      organisation: organisation,
+    });
+
+    res.json({ success: true });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ message: "Server error" });
   }
 });
 
