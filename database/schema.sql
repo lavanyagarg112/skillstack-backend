@@ -14,10 +14,13 @@ CREATE TABLE users (
 -- 2. ORGANISATIONS
 CREATE TABLE organisations (
   id                  SERIAL PRIMARY KEY,
-  organisation_name   VARCHAR(100)    NOT NULL UNIQUE,
+  organisation_name   VARCHAR(100)    NOT NULL,
+  admin_user_id       INTEGER         UNIQUE NOT NULL
+    REFERENCES users(id) ON DELETE NO ACTION,
   description         TEXT            NOT NULL DEFAULT '',
   ai_enabled          BOOLEAN         NOT NULL DEFAULT FALSE,
-  created_at          TIMESTAMPTZ     NOT NULL DEFAULT now()
+  created_at          TIMESTAMPTZ     NOT NULL DEFAULT now(),
+  UNIQUE(organisation_name, admin_user_id)
 );
 
 -- 3. ORGANISATION_USERS
@@ -27,7 +30,7 @@ CREATE TABLE organisation_users (
   organisation_id INTEGER      NOT NULL
     REFERENCES organisations(id) ON DELETE CASCADE,
   role            VARCHAR(10)  NOT NULL
-    CHECK (role IN ('admin','employee')),
+    CHECK (role IN ('admin', 'moderator', 'employee')),
   PRIMARY KEY(user_id, organisation_id)
 );
 
