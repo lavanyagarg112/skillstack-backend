@@ -5,8 +5,8 @@ CREATE TABLE users (
   id                        SERIAL PRIMARY KEY,
   email                     VARCHAR(255)    NOT NULL UNIQUE,
   password_hash             VARCHAR(255)    NOT NULL,
-  firstname                 VARCHAR(100),
-  lastname                  VARCHAR(100),
+  firstname                 VARCHAR(100) NOT NULL,
+  lastname                  VARCHAR(100) NOT NULL,
   created_at                TIMESTAMPTZ     NOT NULL DEFAULT now(),
   has_completed_onboarding  BOOLEAN         NOT NULL DEFAULT FALSE
 );
