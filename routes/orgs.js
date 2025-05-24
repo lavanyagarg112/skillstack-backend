@@ -3,6 +3,16 @@ const express = require("express");
 const pool = require("../database/db");
 const router = express.Router();
 
+function setAuthCookie(res, payload) {
+  res.cookie("auth", JSON.stringify(payload), {
+    httpOnly: true,
+    sameSite: "lax",
+    secure: process.env.NODE_ENV === "production",
+    maxAge: 7 * 24 * 60 * 60 * 1000,
+    path: "/",
+  });
+}
+
 // Create a new organization AND make the current user its admin
 router.post("/", async (req, res) => {
   const { auth } = req.cookies;
@@ -183,6 +193,83 @@ router.get("/settings", async (req, res) => {
   } catch (err) {
     console.error(err);
     return res.status(500).json({ message: "Server error" });
+  }
+});
+
+router.post("/settings", async (req, res) => {
+  const { auth } = req.cookies;
+  if (!auth) return res.status(401).json({ message: "Not authenticated" });
+
+  let session;
+  try {
+    session = JSON.parse(auth);
+  } catch {
+    return res.status(400).json({ message: "Invalid session data" });
+  }
+
+  const userId = session.userId;
+  const { organisation_id, organisation_name, ai_enabled, description } =
+    req.body;
+
+  if (!organisation_id || !organisation_name) {
+    return res
+      .status(400)
+      .json({ message: "organisation_id and organisation_name are required" });
+  }
+
+  const client = await pool.connect();
+  try {
+    await client.query("BEGIN");
+
+    const updateRes = await client.query(
+      `
+      UPDATE organisations
+         SET organisation_name = $1,
+             ai_enabled       = $2,
+             description      = $3
+       WHERE id = $4
+         AND admin_user_id = $5
+       RETURNING id, organisation_name, ai_enabled, description
+      `,
+      [organisation_name, ai_enabled, description, organisation_id, userId]
+    );
+
+    if (!updateRes.rows.length) {
+      await client.query("ROLLBACK");
+      return res
+        .status(403)
+        .json({ message: "Not authorized to update this organization" });
+    }
+
+    await client.query("COMMIT");
+
+    const mem = await pool.query(
+      `SELECT
+     o.id                    AS id,
+     o.organisation_name     AS organisationname,
+     ou.role                 AS role
+   FROM organisation_users ou
+   JOIN organisations o
+     ON o.id = ou.organisation_id
+   WHERE ou.user_id = $1`,
+      [userId]
+    );
+
+    const neworganisation = mem.rows[0] || null;
+
+    // Regenerate auth cookie
+    setAuthCookie(res, {
+      ...session,
+      organisation: neworganisation,
+    });
+
+    return res.json({ organisation: updateRes.rows[0] });
+  } catch (err) {
+    await client.query("ROLLBACK");
+    console.error(err);
+    return res.status(500).json({ message: "Server error" });
+  } finally {
+    client.release();
   }
 });
 
