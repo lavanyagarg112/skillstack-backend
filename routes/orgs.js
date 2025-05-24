@@ -129,7 +129,7 @@ router.get("/my", async (req, res) => {
     const result = await pool.query(
       `SELECT
          o.id,
-         o.organisation_name AS organisationName,
+         o.organisation_name AS organisationname,
          ou.role
        FROM organisation_users ou
        JOIN organisations o
@@ -141,6 +141,41 @@ router.get("/my", async (req, res) => {
     if (!result.rows.length) {
       // no org yet
       return res.json({ organisation: null });
+    }
+
+    // exactly one row guaranteed by PK on user_id
+    return res.json({ organisation: result.rows[0] });
+  } catch (err) {
+    console.error(err);
+    return res.status(500).json({ message: "Server error" });
+  }
+});
+
+router.get("/settings", async (req, res) => {
+  const { auth } = req.cookies;
+  if (!auth) return res.status(401).json({ message: "Not authenticated" });
+
+  let session;
+  try {
+    session = JSON.parse(auth);
+  } catch {
+    return res.status(400).json({ message: "Invalid session data" });
+  }
+
+  try {
+    const result = await pool.query(
+      `SELECT
+         o.id,
+         o.organisation_name,
+         o.ai_enabled,
+         o.description
+       FROM organisations o
+         where o.admin_user_id = $1`,
+      [session.userId]
+    );
+
+    if (!result.rows.length) {
+      return res.status(400).json({ message: "Organization not found" });
     }
 
     // exactly one row guaranteed by PK on user_id

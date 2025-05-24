@@ -64,7 +64,7 @@ router.post("/login", async (req, res) => {
     const mem = await pool.query(
       `SELECT
      o.id                    AS id,
-     o.organisation_name     AS organisationName,
+     o.organisation_name     AS organisationname,
      ou.role                 AS role
    FROM organisation_users ou
    JOIN organisations o
@@ -126,7 +126,7 @@ router.post("/complete-onboarding", async (req, res) => {
     const mem = await pool.query(
       `SELECT
      o.id                    AS id,
-     o.organisation_name     AS organisationName,
+     o.organisation_name     AS organisationname,
      ou.role                 AS role
    FROM organisation_users ou
    JOIN organisations o
