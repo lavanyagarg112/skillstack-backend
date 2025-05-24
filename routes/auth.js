@@ -15,7 +15,7 @@ function setAuthCookie(res, payload) {
 
 // SIGN UP → POST /api/signup
 router.post("/signup", async (req, res) => {
-  const { email, password, firstname = "", lastname = "" } = req.body;
+  const { email, password, firstname, lastname } = req.body;
   try {
     const hash = await bcrypt.hash(password, 10);
     const result = await pool.query(
