@@ -27,10 +27,10 @@ router.post("/", async (req, res) => {
 
     // 1) Insert into organisations
     const orgRes = await client.query(
-      `INSERT INTO organisations (organisation_name)
-       VALUES ($1)
+      `INSERT INTO organisations (organisation_name, admin_user_id)
+       VALUES ($1, $2)
        RETURNING id, organisation_name, created_at`,
-      [organisationName]
+      [organisationName, userId]
     );
     const org = orgRes.rows[0];
 
@@ -48,9 +48,13 @@ router.post("/", async (req, res) => {
     console.error(err);
     // unique violation on org name
     if (err.code === "23505") {
-      return res
-        .status(400)
-        .json({ message: "Organization name already taken" });
+      if (
+        err.constraint === "organisations_organisation_name_admin_user_id_key"
+      ) {
+        return res
+          .status(400)
+          .json({ message: "Organization name already taken" });
+      }
     }
     return res.status(500).json({ message: "Server error" });
   } finally {
@@ -70,9 +74,11 @@ router.post("/addemployee", async (req, res) => {
   }
 
   const userId = session.userId;
-  const { organisationName } = req.body;
-  if (!organisationName) {
-    return res.status(400).json({ message: "organisationName is required" });
+  const { organisationId } = req.body;
+  if (!organisationId) {
+    return res
+      .status(400)
+      .json({ message: "organisation invite code is required" });
   }
 
   const client = await pool.connect();
@@ -81,10 +87,10 @@ router.post("/addemployee", async (req, res) => {
 
     // 1) See if org exists
     const orgRes = await client.query(
-      `SELECT id, organisation_name FROM organisations WHERE organisation_name = $1`,
-      [organisationName]
+      `SELECT id, organisation_name FROM organisations WHERE id = $1`,
+      [organisationId]
     );
-    if (!orgRes.rows) {
+    if (!orgRes.rows.length) {
       return res.status(400).json({ message: "Organization not found" });
     }
     const org = orgRes.rows[0];
@@ -93,7 +99,7 @@ router.post("/addemployee", async (req, res) => {
     await client.query(
       `INSERT INTO organisation_users (user_id, organisation_id, role)
        VALUES ($1, $2, 'employee')`,
-      [userId, org.id]
+      [userId, organisationId]
     );
 
     await client.query("COMMIT");
