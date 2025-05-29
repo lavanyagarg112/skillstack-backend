@@ -2,6 +2,15 @@
 const express = require("express");
 const pool = require("../database/db");
 const router = express.Router();
+const multer = require("multer");
+const path = require("path");
+
+const storage = multer.diskStorage({
+  destination: "uploads/",
+  filename: (req, file, cb) =>
+    cb(null, `${Date.now()}${path.extname(file.originalname)}`),
+});
+const upload = multer({ storage });
 
 function setAuthCookie(res, payload) {
   res.cookie("auth", JSON.stringify(payload), {
@@ -272,6 +281,66 @@ router.post("/get-modules", async (req, res) => {
 
     await client.query("COMMIT");
     return res.status(201).json({ modules: modulesRes.rows || [] });
+  } catch (err) {
+    await client.query("ROLLBACK");
+    console.error(err);
+    return res.status(500).json({ message: "Server error" });
+  } finally {
+    client.release();
+  }
+});
+
+router.post("/add-module", upload.single("file"), async (req, res) => {
+  const { auth } = req.cookies;
+  if (!auth) return res.status(401).json({ message: "Not authenticated" });
+  let session;
+  try {
+    session = JSON.parse(auth);
+  } catch {
+    return res.status(400).json({ message: "Invalid session data" });
+  }
+  if (session.organisation?.role !== "admin") {
+    return res.status(403).json({ message: "Forbidden" });
+  }
+
+  const { courseId, name, type, description = "" } = req.body;
+  const file = req.file;
+  if (!courseId || !name || !type || !file) {
+    return res
+      .status(400)
+      .json({ message: "courseId, title, moduleType & file required" });
+  }
+  const fileUrl = `/uploads/${req.file.filename}`;
+
+  const client = await pool.connect();
+  try {
+    await client.query("BEGIN");
+
+    const posRes = await client.query(
+      `SELECT COALESCE(MAX(position), 0) AS max_pos
+         FROM modules
+         WHERE course_id = $1`,
+      [courseId]
+    );
+    const nextPosition = posRes.rows[0].max_pos + 1;
+
+    const moduleRes = await client.query(
+      `INSERT INTO modules (course_id, title, module_type, description, position, file_url)
+         VALUES ($1, $2, $3, $4, $5, $6)
+         RETURNING id, title, module_type, position, file_url`,
+      [courseId, name, type, description, nextPosition, fileUrl]
+    );
+
+    if (!moduleRes.rows.length) {
+      throw new Error("Failed to create module");
+    }
+
+    const module_id = moduleRes.rows[0].id;
+
+    await client.query("COMMIT");
+    return res.status(201).json({
+      module_id,
+    });
   } catch (err) {
     await client.query("ROLLBACK");
     console.error(err);
