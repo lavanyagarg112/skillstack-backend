@@ -19,6 +19,7 @@ CREATE TABLE organisations (
     REFERENCES users(id) ON DELETE NO ACTION,
   description         TEXT            NOT NULL DEFAULT '',
   ai_enabled          BOOLEAN         NOT NULL DEFAULT FALSE,
+  current_invitation_id TEXT UNIQUE,
   created_at          TIMESTAMPTZ     NOT NULL DEFAULT now(),
   UNIQUE(organisation_name, admin_user_id)
 );
@@ -40,11 +41,12 @@ CREATE TABLE courses (
   id              SERIAL PRIMARY KEY,
   organisation_id INTEGER NOT NULL
     REFERENCES organisations(id) ON DELETE CASCADE,
-  name            VARCHAR(255)    NOT NULL UNIQUE,
+  name            VARCHAR(255)    NOT NULL,
   description     TEXT,
   created_by      INTEGER
     REFERENCES users(id) ON DELETE SET NULL,
-  created_at      TIMESTAMPTZ     NOT NULL DEFAULT now()
+  created_at      TIMESTAMPTZ     NOT NULL DEFAULT now(),
+  UNIQUE(organisation_id, name)
 );
 
 CREATE TABLE enrollments (
@@ -68,7 +70,8 @@ CREATE TABLE modules (
   title         VARCHAR(255) NOT NULL,
   module_type   VARCHAR(50)  NOT NULL,    -- e.g. 'video', 'quiz', 'pdf'
   description   TEXT,
-  position      INTEGER      NOT NULL DEFAULT 0
+  position      INTEGER      NOT NULL DEFAULT 0,
+  file_url      TEXT  NOT NULL
 );
 
 CREATE TABLE revisions (

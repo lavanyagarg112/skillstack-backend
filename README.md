@@ -25,5 +25,5 @@ This is the backend for skillstack platform.
 
 5. Start the server
    ```bash
-   node server.js
+   npm run server
    ```
