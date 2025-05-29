@@ -243,4 +243,42 @@ router.put("/", async (req, res) => {
   }
 });
 
+// MODULES ENDPOINTS
+
+router.post("/get-modules", async (req, res) => {
+  const { auth } = req.cookies;
+  if (!auth) return res.status(401).json({ message: "Not authenticated" });
+
+  let session;
+  try {
+    session = JSON.parse(auth);
+  } catch {
+    return res.status(400).json({ message: "Invalid session data" });
+  }
+
+  const courseId = req.body.courseId;
+  if (!courseId) {
+    return res.status(400).json({ message: "courseId is required" });
+  }
+
+  const client = await pool.connect();
+  try {
+    await client.query("BEGIN");
+
+    const modulesRes = await client.query(
+      `SELECT id, title, module_type, position FROM modules WHERE course_id = $1`,
+      [courseId]
+    );
+
+    await client.query("COMMIT");
+    return res.status(201).json({ modules: modulesRes.rows || [] });
+  } catch (err) {
+    await client.query("ROLLBACK");
+    console.error(err);
+    return res.status(500).json({ message: "Server error" });
+  } finally {
+    client.release();
+  }
+});
+
 module.exports = router;
