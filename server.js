@@ -7,6 +7,7 @@ const pool = require("./database/db");
 const app = express();
 const PORT = process.env.PORT || 4000;
 const path = require("path");
+const fs = require("fs");
 const uploadsDir = path.join(__dirname, "uploads");
 if (!fs.existsSync(uploadsDir)) {
   fs.mkdirSync(uploadsDir, { recursive: true });
