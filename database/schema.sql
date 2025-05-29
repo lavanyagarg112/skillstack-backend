@@ -40,11 +40,12 @@ CREATE TABLE courses (
   id              SERIAL PRIMARY KEY,
   organisation_id INTEGER NOT NULL
     REFERENCES organisations(id) ON DELETE CASCADE,
-  name            VARCHAR(255)    NOT NULL UNIQUE, -- Currently unique. Can be changed later.
+  name            VARCHAR(255)    NOT NULL,
   description     TEXT,
   created_by      INTEGER
     REFERENCES users(id) ON DELETE SET NULL,
-  created_at      TIMESTAMPTZ     NOT NULL DEFAULT now()
+  created_at      TIMESTAMPTZ     NOT NULL DEFAULT now(),
+  UNIQUE(organisation_id, name)
 );
 
 CREATE TABLE enrollments (
