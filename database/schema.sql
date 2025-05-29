@@ -40,7 +40,7 @@ CREATE TABLE courses (
   id              SERIAL PRIMARY KEY,
   organisation_id INTEGER NOT NULL
     REFERENCES organisations(id) ON DELETE CASCADE,
-  name            VARCHAR(255)    NOT NULL UNIQUE,
+  name            VARCHAR(255)    NOT NULL UNIQUE, -- Currently unique. Can be changed later.
   description     TEXT,
   created_by      INTEGER
     REFERENCES users(id) ON DELETE SET NULL,

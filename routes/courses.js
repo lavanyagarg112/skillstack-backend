@@ -97,4 +97,44 @@ router.get("/", async (req, res) => {
   }
 });
 
+router.delete("/", async (req, res) => {
+  const { auth } = req.cookies;
+  if (!auth) return res.status(401).json({ message: "Not authenticated" });
+
+  let session;
+  try {
+    session = JSON.parse(auth);
+  } catch {
+    return res.status(400).json({ message: "Invalid session data" });
+  }
+
+  const userId = session.userId;
+  const organisationId = session.organisation?.id;
+  const courseId = req.body.courseId;
+  if (!courseId) {
+    return res.status(400).json({ message: "courseId is required" });
+  }
+  const client = await pool.connect();
+  try {
+    await client.query("BEGIN");
+
+    const _ = await client.query(
+      `DELETE FROM courses c
+      WHERE c.organisation_id = $1
+      AND c.created_by = $2
+      AND c.id = $3`,
+      [organisationId, userId, courseId]
+    );
+
+    await client.query("COMMIT");
+    return res.status(201).json({ success: true });
+  } catch (err) {
+    await client.query("ROLLBACK");
+    console.error(err);
+    return res.status(500).json({ message: "Server error" });
+  } finally {
+    client.release();
+  }
+});
+
 module.exports = router;
