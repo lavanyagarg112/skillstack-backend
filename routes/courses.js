@@ -74,8 +74,6 @@ router.get("/", async (req, res) => {
   } catch {
     return res.status(400).json({ message: "Invalid session data" });
   }
-
-  const userId = session.userId;
   const organisationId = session.organisation?.id;
 
   const client = await pool.connect();
@@ -84,9 +82,8 @@ router.get("/", async (req, res) => {
 
     const courseRes = await client.query(
       `SELECT c.id, c.name, c.description FROM courses c
-      WHERE c.organisation_id = $1
-      AND c.created_by = $2`,
-      [organisationId, userId]
+      WHERE c.organisation_id = $1`,
+      [organisationId]
     );
 
     await client.query("COMMIT");
