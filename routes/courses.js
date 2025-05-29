@@ -12,16 +12,6 @@ const storage = multer.diskStorage({
 });
 const upload = multer({ storage });
 
-function setAuthCookie(res, payload) {
-  res.cookie("auth", JSON.stringify(payload), {
-    httpOnly: true,
-    sameSite: "lax",
-    secure: process.env.NODE_ENV === "production",
-    maxAge: 7 * 24 * 60 * 60 * 1000,
-    path: "/",
-  });
-}
-
 router.post("/", async (req, res) => {
   const { auth } = req.cookies;
   if (!auth) return res.status(401).json({ message: "Not authenticated" });
