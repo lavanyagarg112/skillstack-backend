@@ -389,4 +389,46 @@ router.delete("/delete-module", async (req, res) => {
   }
 });
 
+router.post("/get-module", async (req, res) => {
+  const { auth } = req.cookies;
+  if (!auth) return res.status(401).json({ message: "Not authenticated" });
+
+  let session;
+  try {
+    session = JSON.parse(auth);
+  } catch {
+    return res.status(400).json({ message: "Invalid session data" });
+  }
+
+  const moduleId = req.body.moduleId;
+  if (!moduleId) {
+    return res.status(400).json({ message: "moduleId is required" });
+  }
+
+  const client = await pool.connect();
+  try {
+    await client.query("BEGIN");
+
+    const moduleRes = await client.query(
+      `SELECT id, title, module_type, description, file_url
+         FROM modules WHERE id = $1`,
+      [moduleId]
+    );
+
+    if (!moduleRes.rows.length) {
+      console.error("Module not found for ID:", moduleId);
+      return res.status(404).json({ message: "Module not found" });
+    }
+
+    await client.query("COMMIT");
+    return res.status(200).json(moduleRes.rows[0]);
+  } catch (err) {
+    await client.query("ROLLBACK");
+    console.error(err);
+    return res.status(500).json({ message: "Server error" });
+  } finally {
+    client.release();
+  }
+});
+
 module.exports = router;

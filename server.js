@@ -6,6 +6,8 @@ const courseRoutes = require("./routes/courses");
 const pool = require("./database/db");
 const app = express();
 const PORT = process.env.PORT || 4000;
+const path = require("path");
+app.use("/uploads", express.static(path.join(__dirname, "uploads")));
 
 app.use(express.json());
 app.use(cookieParser());
