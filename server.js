@@ -3,6 +3,7 @@ const cookieParser = require("cookie-parser");
 const authRoutes = require("./routes/auth");
 const orgRoutes = require("./routes/orgs");
 const courseRoutes = require("./routes/courses");
+const userRoutes = require("./routes/users");
 const pool = require("./database/db");
 const app = express();
 const PORT = process.env.PORT || 4000;
@@ -43,6 +44,7 @@ app.get("/checkconnection", async (req, res) => {
 app.use("/api", authRoutes);
 app.use("/api/orgs", orgRoutes);
 app.use("/api/courses", courseRoutes);
+app.use("/api/users", userRoutes);
 
 app.listen(PORT, () => {
   console.log(`Server running on http://localhost:${PORT}`);
