@@ -350,4 +350,43 @@ router.post("/add-module", upload.single("file"), async (req, res) => {
   }
 });
 
+router.delete("/delete-module", async (req, res) => {
+  const { auth } = req.cookies;
+  if (!auth) return res.status(401).json({ message: "Not authenticated" });
+
+  let session;
+  try {
+    session = JSON.parse(auth);
+  } catch {
+    return res.status(400).json({ message: "Invalid session data" });
+  }
+
+  if (session.organisation?.role !== "admin") {
+    return res.status(403).json({ message: "Forbidden" });
+  }
+
+  const { moduleId } = req.body;
+  if (!moduleId) {
+    return res.status(400).json({ message: "moduleId is required" });
+  }
+
+  const client = await pool.connect();
+  try {
+    await client.query("BEGIN");
+
+    const _ = await client.query(`DELETE FROM modules WHERE id = $1`, [
+      moduleId,
+    ]);
+
+    await client.query("COMMIT");
+    return res.status(201).json({ success: true });
+  } catch (err) {
+    await client.query("ROLLBACK");
+    console.error(err);
+    return res.status(500).json({ message: "Server error" });
+  } finally {
+    client.release();
+  }
+});
+
 module.exports = router;
