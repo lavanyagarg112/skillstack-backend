@@ -85,8 +85,8 @@ router.post("/addemployee", async (req, res) => {
   }
 
   const userId = session.userId;
-  const { organisationName, inviteCode } = req.body;
-  if (!organisationName || !inviteCode) {
+  const { inviteCode } = req.body;
+  if (!inviteCode) {
     return res
       .status(400)
       .json({ message: "organisation invite code is required" });
@@ -98,8 +98,8 @@ router.post("/addemployee", async (req, res) => {
 
     // 1) See if org exists
     const orgRes = await client.query(
-      `SELECT id, organisation_name FROM organisations WHERE organisation_name = $1 AND current_invitation_id = $2`,
-      [organisationName, inviteCode]
+      `SELECT id, organisation_name FROM organisations WHERE current_invitation_id = $1`,
+      [inviteCode]
     );
     if (!orgRes.rows.length) {
       return res.status(400).json({ message: "Organization not found" });
