@@ -461,8 +461,73 @@ router.post("/get-module", async (req, res) => {
       return res.status(404).json({ message: "Module not found" });
     }
 
+    const module = moduleRes.rows[0];
+
+    if (module.module_type === "quiz") {
+      // 2a) get the latest revision
+      const revRes = await client.query(
+        `SELECT id
+           FROM revisions
+          WHERE module_id = $1
+          ORDER BY revision_number DESC
+          LIMIT 1`,
+        [moduleId]
+      );
+
+      if (revRes.rows.length) {
+        const revisionId = revRes.rows[0].id;
+
+        const quizRes = await client.query(
+          `SELECT id, quiz_type
+             FROM quizzes
+            WHERE revision_id = $1`,
+          [revisionId]
+        );
+
+        if (quizRes.rows.length) {
+          const quiz = quizRes.rows[0];
+
+          const questionsRes = await client.query(
+            `SELECT id, question_text, question_type, position
+               FROM questions
+              WHERE quiz_id = $1
+              ORDER BY position`,
+            [quiz.id]
+          );
+
+          const questionIds = questionsRes.rows.map((q) => q.id);
+          let optionsRes = { rows: [] };
+          if (questionIds.length) {
+            optionsRes = await client.query(
+              `SELECT question_id, option_text, is_correct
+                 FROM question_options
+                WHERE question_id = ANY($1)`,
+              [questionIds]
+            );
+          }
+
+          const questions = questionsRes.rows.map((q) => ({
+            question_text: q.question_text,
+            question_type: q.question_type,
+            options: optionsRes.rows
+              .filter((opt) => opt.question_id === q.id)
+              .map((opt) => ({
+                option_text: opt.option_text,
+                is_correct: opt.is_correct,
+              })),
+          }));
+
+          module.quiz = {
+            quiz_type: quiz.quiz_type,
+            questions,
+          };
+          module.file_url = null; // quiz modules don't have file_url
+        }
+      }
+    }
+
     await client.query("COMMIT");
-    return res.status(200).json(moduleRes.rows[0]);
+    return res.status(200).json(module);
   } catch (err) {
     await client.query("ROLLBACK");
     console.error(err);
