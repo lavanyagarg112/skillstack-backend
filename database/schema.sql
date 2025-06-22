@@ -71,7 +71,7 @@ CREATE TABLE modules (
   module_type   VARCHAR(50)  NOT NULL,    -- e.g. 'video', 'quiz', 'pdf'
   description   TEXT,
   position      INTEGER      NOT NULL DEFAULT 0,
-  file_url      TEXT  NOT NULL
+  file_url      TEXT
 );
 
 CREATE TABLE revisions (
