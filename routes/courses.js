@@ -499,7 +499,7 @@ router.post("/get-module", async (req, res) => {
           let optionsRes = { rows: [] };
           if (questionIds.length) {
             optionsRes = await client.query(
-              `SELECT question_id, option_text, is_correct
+              `SELECT id, question_id, option_text, is_correct
                  FROM question_options
                 WHERE question_id = ANY($1)`,
               [questionIds]
@@ -507,11 +507,13 @@ router.post("/get-module", async (req, res) => {
           }
 
           const questions = questionsRes.rows.map((q) => ({
+            id: q.id,
             question_text: q.question_text,
             question_type: q.question_type,
             options: optionsRes.rows
               .filter((opt) => opt.question_id === q.id)
               .map((opt) => ({
+                id: opt.id,
                 option_text: opt.option_text,
                 is_correct: opt.is_correct,
               })),
