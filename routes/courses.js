@@ -818,4 +818,49 @@ router.post("/enroll-course", async (req, res) => {
     client.release();
   }
 });
+
+router.post("/unenroll-course", async (req, res) => {
+  const { auth } = req.cookies;
+  if (!auth) return res.status(401).json({ message: "Not authenticated" });
+
+  let session;
+  try {
+    session = JSON.parse(auth);
+  } catch {
+    return res.status(400).json({ message: "Invalid session data" });
+  }
+
+  const userId = session.userId;
+  const { courseId } = req.body;
+  if (!courseId) {
+    return res.status(400).json({ message: "courseId is required" });
+  }
+
+  const client = await pool.connect();
+  try {
+    await client.query("BEGIN");
+
+    const delRes = await client.query(
+      `DELETE FROM enrollments
+         WHERE user_id = $1
+           AND course_id = $2
+       RETURNING id`,
+      [userId, courseId]
+    );
+
+    if (!delRes.rows.length) {
+      await client.query("ROLLBACK");
+      return res.status(404).json({ message: "Not enrolled in this course" });
+    }
+
+    await client.query("COMMIT");
+    return res.status(200).json({ success: true });
+  } catch (err) {
+    await client.query("ROLLBACK");
+    console.error("Error unenrolling user:", err);
+    return res.status(500).json({ message: "Server error" });
+  } finally {
+    client.release();
+  }
+});
 module.exports = router;
