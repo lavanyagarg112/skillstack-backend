@@ -715,4 +715,59 @@ router.put("/update-module", upload.single("file"), async (req, res) => {
     client.release();
   }
 });
+
+router.get("/all-user-courses", async (req, res) => {
+  const { auth } = req.cookies;
+  if (!auth) return res.status(401).json({ message: "Not authenticated" });
+
+  let session;
+  try {
+    session = JSON.parse(auth);
+  } catch {
+    return res.status(400).json({ message: "Invalid session data" });
+  }
+
+  const userId = session.userId;
+  const organisationId = session.organisation?.id;
+  if (!organisationId) {
+    return res.status(400).json({ message: "Organisation context missing" });
+  }
+
+  const client = await pool.connect();
+  try {
+    await client.query("BEGIN");
+
+    // 1) Courses the user is enrolled in
+    const enrolledRes = await client.query(
+      `SELECT c.id, c.name, c.description
+         FROM courses c
+         JOIN enrollments e ON e.course_id = c.id
+        WHERE e.user_id = $1`,
+      [userId]
+    );
+
+    // 2) All other courses in the same org that they're NOT enrolled in
+    const otherRes = await client.query(
+      `SELECT c.id, c.name, c.description
+         FROM courses c
+        WHERE c.organisation_id = $1
+          AND c.id NOT IN (
+            SELECT course_id FROM enrollments WHERE user_id = $2
+          )`,
+      [organisationId, userId]
+    );
+
+    await client.query("COMMIT");
+    return res.status(200).json({
+      enrolled: enrolledRes.rows,
+      other: otherRes.rows,
+    });
+  } catch (err) {
+    await client.query("ROLLBACK");
+    console.error("Error in all-user-courses:", err);
+    return res.status(500).json({ message: "Server error" });
+  } finally {
+    client.release();
+  }
+});
 module.exports = router;
