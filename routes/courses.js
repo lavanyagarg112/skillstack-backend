@@ -878,6 +878,14 @@ router.post("/is-enrolled", async (req, res) => {
   }
 
   const userId = session.userId;
+  const isOrganisationAdmin = session.organisation?.role === "admin";
+
+  if (isOrganisationAdmin) {
+    return res.status(200).json({
+      enrolled: true,
+    });
+  }
+
   const { courseId } = req.body;
   if (!courseId) {
     return res.status(400).json({ message: "courseId is required" });
