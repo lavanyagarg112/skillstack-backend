@@ -770,4 +770,52 @@ router.get("/all-user-courses", async (req, res) => {
     client.release();
   }
 });
+
+router.post("/enroll-course", async (req, res) => {
+  const { auth } = req.cookies;
+  if (!auth) return res.status(401).json({ message: "Not authenticated" });
+
+  let session;
+  try {
+    session = JSON.parse(auth);
+  } catch {
+    return res.status(400).json({ message: "Invalid session data" });
+  }
+
+  const userId = session.userId;
+  const { courseId } = req.body;
+  if (!courseId) {
+    return res.status(400).json({ message: "courseId is required" });
+  }
+
+  const client = await pool.connect();
+  try {
+    await client.query("BEGIN");
+
+    const insertRes = await client.query(
+      `INSERT INTO enrollments (user_id, course_id)
+         VALUES ($1, $2)
+       RETURNING id, status, started_at`,
+      [userId, courseId]
+    );
+
+    await client.query("COMMIT");
+    return res.status(201).json({
+      success: true,
+      enrollment: insertRes.rows[0],
+    });
+  } catch (err) {
+    await client.query("ROLLBACK");
+    // if the user is already enrolled, unique constraint violation
+    if (err.code === "23505") {
+      return res
+        .status(400)
+        .json({ message: "Already enrolled in this course" });
+    }
+    console.error("Error enrolling user:", err);
+    return res.status(500).json({ message: "Server error" });
+  } finally {
+    client.release();
+  }
+});
 module.exports = router;
