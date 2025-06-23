@@ -863,4 +863,46 @@ router.post("/unenroll-course", async (req, res) => {
     client.release();
   }
 });
+
+router.post("/is-enrolled", async (req, res) => {
+  const { auth } = req.cookies;
+  if (!auth) return res.status(401).json({ message: "Not authenticated" });
+
+  let session;
+  try {
+    session = JSON.parse(auth);
+  } catch {
+    return res.status(400).json({ message: "Invalid session data" });
+  }
+
+  const userId = session.userId;
+  const { courseId } = req.body;
+  if (!courseId) {
+    return res.status(400).json({ message: "courseId is required" });
+  }
+
+  const client = await pool.connect();
+  try {
+    await client.query("BEGIN");
+
+    const enrollRes = await client.query(
+      `SELECT 1 FROM enrollments
+         WHERE user_id = $1
+           AND course_id = $2
+         LIMIT 1`,
+      [userId, courseId]
+    );
+
+    await client.query("COMMIT");
+    return res.status(200).json({
+      enrolled: enrollRes.rows.length > 0,
+    });
+  } catch (err) {
+    await client.query("ROLLBACK");
+    console.error("Error checking enrollment:", err);
+    return res.status(500).json({ message: "Server error" });
+  } finally {
+    client.release();
+  }
+});
 module.exports = router;
