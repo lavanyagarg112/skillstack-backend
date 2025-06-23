@@ -520,6 +520,7 @@ router.post("/get-module", async (req, res) => {
           }));
 
           module.quiz = {
+            id: quiz.id,
             quiz_type: quiz.quiz_type,
             questions,
           };
@@ -915,4 +916,64 @@ router.post("/is-enrolled", async (req, res) => {
     client.release();
   }
 });
+
+router.post("/submit-quiz", async (req, res) => {
+  const { auth } = req.cookies;
+  if (!auth) return res.status(401).json({ message: "Not authenticated" });
+
+  let session;
+  try {
+    session = JSON.parse(auth);
+  } catch {
+    return res.status(400).json({ message: "Invalid session data" });
+  }
+  const userId = session.userId;
+
+  const { quizId, answers } = req.body;
+  if (!quizId || !Array.isArray(answers)) {
+    return res
+      .status(400)
+      .json({ message: "quizId and answers array are required" });
+  }
+
+  const client = await pool.connect();
+  try {
+    await client.query("BEGIN");
+
+    const respRes = await client.query(
+      `INSERT INTO quiz_responses (user_id, quiz_id)
+         VALUES ($1, $2)
+       RETURNING id`,
+      [userId, quizId]
+    );
+    const responseId = respRes.rows[0].id;
+
+    for (const ans of answers) {
+      const { questionId, selectedOptionIds } = ans;
+      if (!questionId || !Array.isArray(selectedOptionIds)) {
+        throw new Error(
+          "Each answer must have questionId and selectedOptionIds[]"
+        );
+      }
+      for (const optId of selectedOptionIds) {
+        await client.query(
+          `INSERT INTO quiz_answers
+             (response_id, question_id, selected_option_id)
+           VALUES ($1, $2, $3)`,
+          [responseId, questionId, optId]
+        );
+      }
+    }
+
+    await client.query("COMMIT");
+    return res.status(201).json({ success: true, responseId });
+  } catch (err) {
+    await client.query("ROLLBACK");
+    console.error("Error submitting quiz:", err);
+    return res.status(500).json({ message: "Server error" });
+  } finally {
+    client.release();
+  }
+});
+
 module.exports = router;
