@@ -159,7 +159,7 @@ CREATE TABLE quiz_answers (
   selected_option_id INTEGER
     REFERENCES question_options(id) ON DELETE SET NULL,
   answer_text        TEXT,
-  UNIQUE(response_id, question_id)
+  -- UNIQUE(response_id, question_id)
 );
 
 
