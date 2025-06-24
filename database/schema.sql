@@ -61,6 +61,18 @@ CREATE TABLE enrollments (
   UNIQUE(user_id, course_id)
 );
 
+CREATE TABLE MODULE_STATUS (
+  id            SERIAL PRIMARY KEY,
+  enrollment_id INTEGER    NOT NULL
+    REFERENCES enrollments(id) ON DELETE CASCADE,
+  module_id     INTEGER    NOT NULL
+    REFERENCES modules(id) ON DELETE CASCADE,
+  status        VARCHAR(50) NOT NULL DEFAULT 'not_started', -- 'not_started', 'in_progress', 'completed'
+  started_at    TIMESTAMPTZ,
+  completed_at  TIMESTAMPTZ,
+  UNIQUE(enrollment_id, module_id)
+);
+
 
 -- 5. MODULES & REVISIONS
 CREATE TABLE modules (
