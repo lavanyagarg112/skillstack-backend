@@ -61,7 +61,7 @@ CREATE TABLE enrollments (
   UNIQUE(user_id, course_id)
 );
 
-CREATE TABLE MODULE_STATUS (
+CREATE TABLE module_status (
   id            SERIAL PRIMARY KEY,
   enrollment_id INTEGER    NOT NULL
     REFERENCES enrollments(id) ON DELETE CASCADE,
