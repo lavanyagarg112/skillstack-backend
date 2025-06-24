@@ -917,10 +917,161 @@ router.post("/is-enrolled", async (req, res) => {
   }
 });
 
+// helper
+async function submitQuizResponse(client, userId, quizId, answers) {
+  const respRes = await client.query(
+    `INSERT INTO quiz_responses (user_id, quiz_id)
+       VALUES ($1, $2)
+     RETURNING id`,
+    [userId, quizId]
+  );
+  const responseId = respRes.rows[0].id;
+
+  for (const ans of answers) {
+    const { questionId, selectedOptionIds } = ans;
+    if (!questionId || !Array.isArray(selectedOptionIds)) {
+      throw new Error(
+        "Each answer must have questionId and selectedOptionIds[]"
+      );
+    }
+    for (const optId of selectedOptionIds) {
+      await client.query(
+        `INSERT INTO quiz_answers
+           (response_id, question_id, selected_option_id)
+         VALUES ($1, $2, $3)`,
+        [responseId, questionId, optId]
+      );
+    }
+  }
+
+  return responseId;
+}
+
+// helper
+async function gradeQuizResponse(client, responseId) {
+  const userAnsRes = await client.query(
+    `SELECT question_id,
+            ARRAY_AGG(selected_option_id) AS selected_option_ids
+       FROM quiz_answers
+      WHERE response_id = $1
+      GROUP BY question_id`,
+    [responseId]
+  );
+  const userAnswers = userAnsRes.rows;
+  const questionIds = userAnswers.map((r) => r.question_id);
+
+  const correctMap = {};
+  if (questionIds.length) {
+    const correctRes = await client.query(
+      `SELECT question_id,
+              ARRAY_AGG(id) AS correct_option_ids
+         FROM question_options
+        WHERE question_id = ANY($1) AND is_correct = TRUE
+        GROUP BY question_id`,
+      [questionIds]
+    );
+    for (const row of correctRes.rows) {
+      correctMap[row.question_id] = row.correct_option_ids;
+    }
+  }
+
+  const optionTextMap = {};
+  if (questionIds.length) {
+    const optsRes = await client.query(
+      `SELECT id, option_text
+         FROM question_options
+        WHERE question_id = ANY($1)`,
+      [questionIds]
+    );
+    for (const { id, option_text } of optsRes.rows) {
+      optionTextMap[id] = option_text;
+    }
+  }
+
+  return userAnswers.map(({ question_id, selected_option_ids }) => {
+    const correctIds = correctMap[question_id] || [];
+    const selectedIds = selected_option_ids || [];
+
+    const correctOptions = correctIds.map((id) => ({
+      id,
+      text: optionTextMap[id] || "",
+    }));
+    const selectedOptions = selectedIds.map((id) => ({
+      id,
+      text: optionTextMap[id] || "",
+    }));
+
+    const isCorrect =
+      correctIds.length === selectedIds.length &&
+      correctIds.every((id) => selectedIds.includes(id));
+
+    return {
+      questionId: question_id,
+      correctOptions,
+      selectedOptions,
+      isCorrect,
+    };
+  });
+}
+
 router.post("/submit-quiz", async (req, res) => {
   const { auth } = req.cookies;
   if (!auth) return res.status(401).json({ message: "Not authenticated" });
+  let session;
+  try {
+    session = JSON.parse(auth);
+  } catch {
+    return res.status(400).json({ message: "Invalid session data" });
+  }
+  const { quizId, answers } = req.body;
+  const client = await pool.connect();
+  try {
+    await client.query("BEGIN");
+    const responseId = await submitQuizResponse(
+      client,
+      userId,
+      quizId,
+      answers
+    );
+    await client.query("COMMIT");
+    return res.status(201).json({ success: true, responseId });
+  } catch (err) {
+    await client.query("ROLLBACK");
+    console.error(err);
+    return res.status(500).json({ message: "Server error" });
+  } finally {
+    client.release();
+  }
+});
 
+router.post("/grade-quiz", async (req, res) => {
+  const { auth } = req.cookies;
+  if (!auth) return res.status(401).json({ message: "Not authenticated" });
+  let session;
+  try {
+    session = JSON.parse(auth);
+  } catch {
+    return res.status(400).json({ message: "Invalid session data" });
+  }
+  const { responseId } = req.body;
+  const client = await pool.connect();
+  try {
+    await client.query("BEGIN");
+    const results = await gradeQuizResponse(client, responseId);
+    await client.query("COMMIT");
+    return res.status(200).json({ results });
+  } catch (err) {
+    await client.query("ROLLBACK");
+    console.error(err);
+    return res.status(500).json({ message: "Server error" });
+  } finally {
+    client.release();
+  }
+});
+
+router.post("/submit-and-grade-quiz", async (req, res) => {
+  const { auth } = req.cookies;
+  if (!auth) return res.status(401).json({ message: "Not authenticated" });
   let session;
   try {
     session = JSON.parse(auth);
@@ -931,45 +1082,66 @@ router.post("/submit-quiz", async (req, res) => {
 
   const { quizId, answers } = req.body;
   if (!quizId || !Array.isArray(answers)) {
-    return res
-      .status(400)
-      .json({ message: "quizId and answers array are required" });
+    return res.status(400).json({ message: "quizId and answers[] required" });
   }
 
   const client = await pool.connect();
   try {
     await client.query("BEGIN");
-
-    const respRes = await client.query(
-      `INSERT INTO quiz_responses (user_id, quiz_id)
-         VALUES ($1, $2)
-       RETURNING id`,
-      [userId, quizId]
+    const responseId = await submitQuizResponse(
+      client,
+      userId,
+      quizId,
+      answers
     );
-    const responseId = respRes.rows[0].id;
-
-    for (const ans of answers) {
-      const { questionId, selectedOptionIds } = ans;
-      if (!questionId || !Array.isArray(selectedOptionIds)) {
-        throw new Error(
-          "Each answer must have questionId and selectedOptionIds[]"
-        );
-      }
-      for (const optId of selectedOptionIds) {
-        await client.query(
-          `INSERT INTO quiz_answers
-             (response_id, question_id, selected_option_id)
-           VALUES ($1, $2, $3)`,
-          [responseId, questionId, optId]
-        );
-      }
-    }
-
+    const results = await gradeQuizResponse(client, responseId);
     await client.query("COMMIT");
-    return res.status(201).json({ success: true, responseId });
+    return res.status(200).json({ responseId, results });
   } catch (err) {
     await client.query("ROLLBACK");
-    console.error("Error submitting quiz:", err);
+    console.error("Error in submit-and-grade-quiz:", err);
+    return res.status(500).json({ message: "Server error" });
+  } finally {
+    client.release();
+  }
+});
+
+router.post("/get-latest-quiz-response", async (req, res) => {
+  const { auth } = req.cookies;
+  if (!auth) return res.status(401).json({ message: "Not authenticated" });
+  let session;
+  try {
+    session = JSON.parse(auth);
+  } catch {
+    return res.status(400).json({ message: "Invalid session data" });
+  }
+  const userId = session.userId;
+
+  const { quizId } = req.body;
+  if (!quizId) {
+    return res.status(400).json({ message: "quizId is required" });
+  }
+
+  const client = await pool.connect();
+  try {
+    await client.query("BEGIN");
+    const respRes = await client.query(
+      `SELECT id
+         FROM quiz_responses
+        WHERE user_id = $1
+          AND quiz_id = $2
+        ORDER BY submitted_at DESC
+        LIMIT 1`,
+      [userId, quizId]
+    );
+    await client.query("COMMIT");
+    if (!respRes.rows.length) {
+      return res.status(200).json({ responseId: null });
+    }
+    return res.status(200).json({ responseId: respRes.rows[0].id });
+  } catch (err) {
+    await client.query("ROLLBACK");
+    console.error("Error fetching latest quiz response:", err);
     return res.status(500).json({ message: "Server error" });
   } finally {
     client.release();
