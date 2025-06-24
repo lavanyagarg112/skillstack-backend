@@ -1125,6 +1125,7 @@ router.post("/get-latest-quiz-response", async (req, res) => {
   const client = await pool.connect();
   try {
     await client.query("BEGIN");
+
     const respRes = await client.query(
       `SELECT id
          FROM quiz_responses
@@ -1134,14 +1135,20 @@ router.post("/get-latest-quiz-response", async (req, res) => {
         LIMIT 1`,
       [userId, quizId]
     );
-    await client.query("COMMIT");
     if (!respRes.rows.length) {
-      return res.status(200).json({ responseId: null });
+      await client.query("COMMIT");
+      return res.status(200).json({ responseId: null, results: null });
     }
-    return res.status(200).json({ responseId: respRes.rows[0].id });
+
+    const responseId = respRes.rows[0].id;
+
+    const results = await gradeQuizResponse(client, responseId);
+
+    await client.query("COMMIT");
+    return res.status(200).json({ responseId, results });
   } catch (err) {
     await client.query("ROLLBACK");
-    console.error("Error fetching latest quiz response:", err);
+    console.error("Error fetching & grading quiz:", err);
     return res.status(500).json({ message: "Server error" });
   } finally {
     client.release();
