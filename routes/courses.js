@@ -946,6 +946,19 @@ router.post("/unenroll-course", async (req, res) => {
       [enrollmentId]
     );
 
+    await client.query(
+      `DELETE FROM quiz_responses
+         WHERE user_id = $1
+           AND quiz_id IN (
+             SELECT id FROM quizzes WHERE revision_id IN (
+               SELECT id FROM revisions WHERE module_id IN (
+                 SELECT id FROM modules WHERE course_id = $2
+               )
+             )
+           )`,
+      [userId, courseId]
+    );
+
     await client.query("COMMIT");
     return res.status(200).json({ success: true });
   } catch (err) {
@@ -1421,6 +1434,12 @@ router.post("/get-module-status", async (req, res) => {
 
     const enrollmentId = enrolmentRes.rows[0]?.id;
 
+    const isCourseCompleted = await client.query(
+      `SELECT 1 FROM enrollments
+         WHERE id = $1 AND status = 'completed'`,
+      [enrollmentId]
+    );
+
     const statusRes = await client.query(
       `SELECT status FROM module_status
          WHERE enrollment_id = $1 AND module_id = $2`,
@@ -1430,6 +1449,7 @@ router.post("/get-module-status", async (req, res) => {
     await client.query("COMMIT");
     return res.status(200).json({
       status: statusRes.rows.length ? statusRes.rows[0].status : "not_started",
+      isCourseCompleted: isCourseCompleted.rows.length > 0,
     });
   } catch (err) {
     await client.query("ROLLBACK");
