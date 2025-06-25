@@ -740,51 +740,75 @@ router.get("/all-user-courses", async (req, res) => {
   try {
     await client.query("BEGIN");
 
-    // 1) Courses the user is enrolled in
+    // 1) “Enrolled” courses (status = 'enrolled')
     const enrolledRes = await client.query(
       `
       SELECT
         c.id,
         c.name,
         c.description,
-        -- total modules in the course
-        (
-          SELECT COUNT(*) 
-          FROM modules m 
-          WHERE m.course_id = c.id
-        ) AS total_modules,
-        -- modules completed by this user
-        (
-          SELECT COUNT(*) 
-          FROM enrollments e
-          JOIN module_status ms ON ms.enrollment_id = e.id
-          WHERE e.user_id      = $1
-            AND e.course_id    = c.id
-            AND ms.module_id   IN (SELECT id FROM modules WHERE course_id = c.id)
-            AND ms.status      = 'completed'
-        ) AS completed_modules
+        COUNT(m.id)                             AS total_modules,
+        COUNT(ms.id) FILTER (WHERE ms.status = 'completed')
+                                                AS completed_modules
       FROM courses c
-      JOIN enrollments e
-        ON e.course_id = c.id
-      WHERE e.user_id = $1
+        JOIN enrollments e
+          ON e.course_id = c.id
+        AND e.user_id   = $1
+        AND e.status    = 'enrolled'
+        LEFT JOIN modules m
+          ON m.course_id = c.id
+        LEFT JOIN module_status ms
+          ON ms.module_id     = m.id
+        AND ms.enrollment_id = e.id
+      GROUP BY c.id, c.name, c.description;
       `,
       [userId]
     );
 
-    // 2) All other courses in the same org that they're NOT enrolled in
+    // 2) “Completed” courses (status = 'completed')
+    const completedRes = await client.query(
+      `
+      SELECT
+        c.id,
+        c.name,
+        c.description,
+        COUNT(m.id)                             AS total_modules,
+        COUNT(ms.id) FILTER (WHERE ms.status = 'completed')
+                                                AS completed_modules
+      FROM courses c
+        JOIN enrollments e
+          ON e.course_id = c.id
+        AND e.user_id   = $1
+        AND e.status    = 'completed'
+        LEFT JOIN modules m
+          ON m.course_id = c.id
+        LEFT JOIN module_status ms
+          ON ms.module_id     = m.id
+        AND ms.enrollment_id = e.id
+      GROUP BY c.id, c.name, c.description;
+      `,
+      [userId]
+    );
+
+    // 3) Others in same org, not enrolled at all
     const otherRes = await client.query(
-      `SELECT c.id, c.name, c.description
-         FROM courses c
-        WHERE c.organisation_id = $1
-          AND c.id NOT IN (
-            SELECT course_id FROM enrollments WHERE user_id = $2
-          )`,
+      `
+      SELECT c.id, c.name, c.description
+      FROM courses c
+      WHERE c.organisation_id = $1
+        AND c.id NOT IN (
+          SELECT course_id
+          FROM enrollments
+          WHERE user_id = $2
+        )
+      `,
       [organisationId, userId]
     );
 
     await client.query("COMMIT");
     return res.status(200).json({
       enrolled: enrolledRes.rows,
+      completed: completedRes.rows,
       other: otherRes.rows,
     });
   } catch (err) {
