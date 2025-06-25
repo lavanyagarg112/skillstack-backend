@@ -802,6 +802,25 @@ router.post("/enroll-course", async (req, res) => {
       [userId, courseId]
     );
 
+    const enrollmentId = insertRes.rows[0].id;
+
+    const modulesRes = await client.query(
+      `SELECT id
+         FROM modules
+        WHERE course_id = $1`,
+      [courseId]
+    );
+
+    for (const { id: moduleId } of modulesRes.rows) {
+      await client.query(
+        `INSERT INTO module_status
+           (enrollment_id, module_id, status)
+         VALUES ($1, $2, 'not_started')
+         ON CONFLICT (enrollment_id, module_id) DO NOTHING`,
+        [enrollmentId, moduleId]
+      );
+    }
+
     await client.query("COMMIT");
     return res.status(201).json({
       success: true,
@@ -855,6 +874,14 @@ router.post("/unenroll-course", async (req, res) => {
       await client.query("ROLLBACK");
       return res.status(404).json({ message: "Not enrolled in this course" });
     }
+
+    const enrollmentId = delRes.rows[0].id;
+
+    await client.query(
+      `DELETE FROM module_status
+         WHERE enrollment_id = $1`,
+      [enrollmentId]
+    );
 
     await client.query("COMMIT");
     return res.status(200).json({ success: true });
@@ -1149,6 +1176,61 @@ router.post("/get-latest-quiz-response", async (req, res) => {
   } catch (err) {
     await client.query("ROLLBACK");
     console.error("Error fetching & grading quiz:", err);
+    return res.status(500).json({ message: "Server error" });
+  } finally {
+    client.release();
+  }
+});
+
+router.post("/get-module-status", async (req, res) => {
+  const { auth } = req.cookies;
+  if (!auth) return res.status(401).json({ message: "Not authenticated" });
+
+  let session;
+  try {
+    session = JSON.parse(auth);
+  } catch {
+    return res.status(400).json({ message: "Invalid session data" });
+  }
+
+  const userId = session.userId;
+  const moduleId = req.body.moduleId;
+  if (!moduleId) {
+    return res.status(400).json({ message: "moduleId is required" });
+  }
+
+  const client = await pool.connect();
+  try {
+    await client.query("BEGIN");
+
+    const courseIdRes = await client.query(
+      `SELECT course_id FROM modules WHERE id = $1`,
+      [moduleId]
+    );
+
+    const courseId = courseIdRes.rows[0]?.course_id;
+
+    const enrolmentRes = await client.query(
+      `SELECT id FROM enrollments
+         WHERE user_id = $1 AND course_id = $2`,
+      [userId, courseId]
+    );
+
+    const enrollmentId = enrolmentRes.rows[0]?.id;
+
+    const statusRes = await client.query(
+      `SELECT status FROM module_status
+         WHERE enrollment_id = $1 AND module_id = $2`,
+      [enrollmentId, moduleId]
+    );
+
+    await client.query("COMMIT");
+    return res.status(200).json({
+      status: statusRes.rows.length ? statusRes.rows[0].status : "not_started",
+    });
+  } catch (err) {
+    await client.query("ROLLBACK");
+    console.error(err);
     return res.status(500).json({ message: "Server error" });
   } finally {
     client.release();
