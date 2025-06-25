@@ -703,6 +703,12 @@ router.put("/update-module", upload.single("file"), async (req, res) => {
       );
       await client.query(`DELETE FROM questions WHERE quiz_id = $1`, [quizId]);
 
+      await client.query(
+        `DELETE FROM quiz_responses
+       WHERE quiz_id = $1`,
+        [quizId]
+      );
+
       for (let i = 0; i < qs.length; i++) {
         const { question_text, question_type, options } = qs[i];
         const qRes = await client.query(
@@ -722,6 +728,34 @@ router.put("/update-module", upload.single("file"), async (req, res) => {
             [questionId, opt.option_text, opt.is_correct]
           );
         }
+      }
+    }
+
+    if (type) {
+      const courseIdRes = await client.query(
+        `SELECT course_id FROM modules WHERE id = $1`,
+        [moduleId]
+      );
+
+      if (!courseIdRes.rows.length) {
+        return res.status(404).json({ message: "Module not found" });
+      }
+      const courseId = courseIdRes.rows[0].course_id;
+
+      const { rows: enrollments } = await client.query(
+        `SELECT id
+      FROM enrollments
+      WHERE course_id = $1`,
+        [courseId]
+      );
+
+      for (const { id: enrollmentId } of enrollments) {
+        await client.query(
+          `UPDATE module_status
+             SET status = 'not_started'
+           WHERE enrollment_id = $1 AND module_id = $2`,
+          [enrollmentId, moduleId]
+        );
       }
     }
 
