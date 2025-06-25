@@ -333,6 +333,23 @@ router.post("/add-module", upload.single("file"), async (req, res) => {
 
     const module_id = moduleRes.rows[0].id;
 
+    const { rows: enrollments } = await client.query(
+      `SELECT id
+     FROM enrollments
+    WHERE course_id = $1`,
+      [courseId]
+    );
+
+    for (const { id: enrollmentId } of enrollments) {
+      await client.query(
+        `INSERT INTO module_status
+       (enrollment_id, module_id, status)
+     VALUES ($1, $2, 'not_started')
+     ON CONFLICT (enrollment_id, module_id) DO NOTHING`,
+        [enrollmentId, module_id]
+      );
+    }
+
     if (type === "quiz") {
       // revision for this module
       const revRes = await client.query(
@@ -986,6 +1003,47 @@ router.post("/complete-course", async (req, res) => {
       `UPDATE enrollments
          SET status = 'completed',
              completed_at = NOW()
+       WHERE user_id = $1
+         AND course_id = $2`,
+      [userId, courseId]
+    );
+
+    await client.query("COMMIT");
+    return res.status(200).json({ success: true });
+  } catch (err) {
+    await client.query("ROLLBACK");
+    console.error("Error completing course:", err);
+    return res.status(500).json({ message: "Server error" });
+  } finally {
+    client.release();
+  }
+});
+
+router.post("/uncomplete-course", async (req, res) => {
+  const { auth } = req.cookies;
+  if (!auth) return res.status(401).json({ message: "Not authenticated" });
+
+  let session;
+  try {
+    session = JSON.parse(auth);
+  } catch {
+    return res.status(400).json({ message: "Invalid session data" });
+  }
+
+  const userId = session.userId;
+  const { courseId } = req.body;
+  if (!courseId) {
+    return res.status(400).json({ message: "courseId is required" });
+  }
+
+  const client = await pool.connect();
+  try {
+    await client.query("BEGIN");
+
+    await client.query(
+      `UPDATE enrollments
+         SET status = 'enrolled',
+             completed_at = NULL
        WHERE user_id = $1
          AND course_id = $2`,
       [userId, courseId]
