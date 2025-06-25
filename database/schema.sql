@@ -189,6 +189,14 @@ CREATE TABLE course_tags (
   PRIMARY KEY(course_id, tag_id)
 );
 
+CREATE TABLE module_tags (
+  module_id INTEGER NOT NULL
+    REFERENCES modules(id) ON DELETE CASCADE,
+  tag_id    INTEGER NOT NULL
+    REFERENCES tags(id) ON DELETE CASCADE,
+  PRIMARY KEY(module_id, tag_id)
+);
+
 CREATE TABLE revision_tags (
   revision_id INTEGER NOT NULL
     REFERENCES revisions(id) ON DELETE CASCADE,
