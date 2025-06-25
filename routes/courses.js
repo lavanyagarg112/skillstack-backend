@@ -333,6 +333,23 @@ router.post("/add-module", upload.single("file"), async (req, res) => {
 
     const module_id = moduleRes.rows[0].id;
 
+    const { rows: enrollments } = await client.query(
+      `SELECT id
+     FROM enrollments
+    WHERE course_id = $1`,
+      [courseId]
+    );
+
+    for (const { id: enrollmentId } of enrollments) {
+      await client.query(
+        `INSERT INTO module_status
+       (enrollment_id, module_id, status)
+     VALUES ($1, $2, 'not_started')
+     ON CONFLICT (enrollment_id, module_id) DO NOTHING`,
+        [enrollmentId, module_id]
+      );
+    }
+
     if (type === "quiz") {
       // revision for this module
       const revRes = await client.query(
@@ -499,7 +516,7 @@ router.post("/get-module", async (req, res) => {
           let optionsRes = { rows: [] };
           if (questionIds.length) {
             optionsRes = await client.query(
-              `SELECT question_id, option_text, is_correct
+              `SELECT id, question_id, option_text, is_correct
                  FROM question_options
                 WHERE question_id = ANY($1)`,
               [questionIds]
@@ -507,17 +524,20 @@ router.post("/get-module", async (req, res) => {
           }
 
           const questions = questionsRes.rows.map((q) => ({
+            id: q.id,
             question_text: q.question_text,
             question_type: q.question_type,
             options: optionsRes.rows
               .filter((opt) => opt.question_id === q.id)
               .map((opt) => ({
+                id: opt.id,
                 option_text: opt.option_text,
                 is_correct: opt.is_correct,
               })),
           }));
 
           module.quiz = {
+            id: quiz.id,
             quiz_type: quiz.quiz_type,
             questions,
           };
@@ -683,6 +703,12 @@ router.put("/update-module", upload.single("file"), async (req, res) => {
       );
       await client.query(`DELETE FROM questions WHERE quiz_id = $1`, [quizId]);
 
+      await client.query(
+        `DELETE FROM quiz_responses
+       WHERE quiz_id = $1`,
+        [quizId]
+      );
+
       for (let i = 0; i < qs.length; i++) {
         const { question_text, question_type, options } = qs[i];
         const qRes = await client.query(
@@ -705,6 +731,34 @@ router.put("/update-module", upload.single("file"), async (req, res) => {
       }
     }
 
+    if (type) {
+      const courseIdRes = await client.query(
+        `SELECT course_id FROM modules WHERE id = $1`,
+        [moduleId]
+      );
+
+      if (!courseIdRes.rows.length) {
+        return res.status(404).json({ message: "Module not found" });
+      }
+      const courseId = courseIdRes.rows[0].course_id;
+
+      const { rows: enrollments } = await client.query(
+        `SELECT id
+      FROM enrollments
+      WHERE course_id = $1`,
+        [courseId]
+      );
+
+      for (const { id: enrollmentId } of enrollments) {
+        await client.query(
+          `UPDATE module_status
+             SET status = 'not_started'
+           WHERE enrollment_id = $1 AND module_id = $2`,
+          [enrollmentId, moduleId]
+        );
+      }
+    }
+
     await client.query("COMMIT");
     return res.status(200).json({ success: true });
   } catch (err) {
@@ -715,4 +769,858 @@ router.put("/update-module", upload.single("file"), async (req, res) => {
     client.release();
   }
 });
+
+router.get("/all-user-courses", async (req, res) => {
+  const { auth } = req.cookies;
+  if (!auth) return res.status(401).json({ message: "Not authenticated" });
+
+  let session;
+  try {
+    session = JSON.parse(auth);
+  } catch {
+    return res.status(400).json({ message: "Invalid session data" });
+  }
+
+  const userId = session.userId;
+  const organisationId = session.organisation?.id;
+  if (!organisationId) {
+    return res.status(400).json({ message: "Organisation context missing" });
+  }
+
+  const client = await pool.connect();
+  try {
+    await client.query("BEGIN");
+
+    // 1) “Enrolled” courses (status = 'enrolled')
+    const enrolledRes = await client.query(
+      `
+      SELECT
+        c.id,
+        c.name,
+        c.description,
+        COUNT(m.id)                             AS total_modules,
+        COUNT(ms.id) FILTER (WHERE ms.status = 'completed')
+                                                AS completed_modules
+      FROM courses c
+        JOIN enrollments e
+          ON e.course_id = c.id
+        AND e.user_id   = $1
+        AND e.status    = 'enrolled'
+        LEFT JOIN modules m
+          ON m.course_id = c.id
+        LEFT JOIN module_status ms
+          ON ms.module_id     = m.id
+        AND ms.enrollment_id = e.id
+      GROUP BY c.id, c.name, c.description;
+      `,
+      [userId]
+    );
+
+    // 2) “Completed” courses (status = 'completed')
+    const completedRes = await client.query(
+      `
+      SELECT
+        c.id,
+        c.name,
+        c.description,
+        COUNT(m.id)                             AS total_modules,
+        COUNT(ms.id) FILTER (WHERE ms.status = 'completed')
+                                                AS completed_modules
+      FROM courses c
+        JOIN enrollments e
+          ON e.course_id = c.id
+        AND e.user_id   = $1
+        AND e.status    = 'completed'
+        LEFT JOIN modules m
+          ON m.course_id = c.id
+        LEFT JOIN module_status ms
+          ON ms.module_id     = m.id
+        AND ms.enrollment_id = e.id
+      GROUP BY c.id, c.name, c.description;
+      `,
+      [userId]
+    );
+
+    // 3) Others in same org, not enrolled at all
+    const otherRes = await client.query(
+      `
+      SELECT c.id, c.name, c.description
+      FROM courses c
+      WHERE c.organisation_id = $1
+        AND c.id NOT IN (
+          SELECT course_id
+          FROM enrollments
+          WHERE user_id = $2
+        )
+      `,
+      [organisationId, userId]
+    );
+
+    await client.query("COMMIT");
+    return res.status(200).json({
+      enrolled: enrolledRes.rows,
+      completed: completedRes.rows,
+      other: otherRes.rows,
+    });
+  } catch (err) {
+    await client.query("ROLLBACK");
+    console.error("Error in all-user-courses:", err);
+    return res.status(500).json({ message: "Server error" });
+  } finally {
+    client.release();
+  }
+});
+
+router.post("/enroll-course", async (req, res) => {
+  const { auth } = req.cookies;
+  if (!auth) return res.status(401).json({ message: "Not authenticated" });
+
+  let session;
+  try {
+    session = JSON.parse(auth);
+  } catch {
+    return res.status(400).json({ message: "Invalid session data" });
+  }
+
+  const userId = session.userId;
+  const { courseId } = req.body;
+  if (!courseId) {
+    return res.status(400).json({ message: "courseId is required" });
+  }
+
+  const client = await pool.connect();
+  try {
+    await client.query("BEGIN");
+
+    const insertRes = await client.query(
+      `INSERT INTO enrollments (user_id, course_id, started_at)
+         VALUES ($1, $2, NOW())
+       RETURNING id, status, started_at`,
+      [userId, courseId]
+    );
+
+    const enrollmentId = insertRes.rows[0].id;
+
+    const modulesRes = await client.query(
+      `SELECT id
+         FROM modules
+        WHERE course_id = $1`,
+      [courseId]
+    );
+
+    for (const { id: moduleId } of modulesRes.rows) {
+      await client.query(
+        `INSERT INTO module_status
+           (enrollment_id, module_id, status)
+         VALUES ($1, $2, 'not_started')
+         ON CONFLICT (enrollment_id, module_id) DO NOTHING`,
+        [enrollmentId, moduleId]
+      );
+    }
+
+    await client.query("COMMIT");
+    return res.status(201).json({
+      success: true,
+      enrollment: insertRes.rows[0],
+    });
+  } catch (err) {
+    await client.query("ROLLBACK");
+    // if the user is already enrolled, unique constraint violation
+    if (err.code === "23505") {
+      return res
+        .status(400)
+        .json({ message: "Already enrolled in this course" });
+    }
+    console.error("Error enrolling user:", err);
+    return res.status(500).json({ message: "Server error" });
+  } finally {
+    client.release();
+  }
+});
+
+router.post("/unenroll-course", async (req, res) => {
+  const { auth } = req.cookies;
+  if (!auth) return res.status(401).json({ message: "Not authenticated" });
+
+  let session;
+  try {
+    session = JSON.parse(auth);
+  } catch {
+    return res.status(400).json({ message: "Invalid session data" });
+  }
+
+  const userId = session.userId;
+  const { courseId } = req.body;
+  if (!courseId) {
+    return res.status(400).json({ message: "courseId is required" });
+  }
+
+  const client = await pool.connect();
+  try {
+    await client.query("BEGIN");
+
+    const delRes = await client.query(
+      `DELETE FROM enrollments
+         WHERE user_id = $1
+           AND course_id = $2
+       RETURNING id`,
+      [userId, courseId]
+    );
+
+    if (!delRes.rows.length) {
+      await client.query("ROLLBACK");
+      return res.status(404).json({ message: "Not enrolled in this course" });
+    }
+
+    const enrollmentId = delRes.rows[0].id;
+
+    await client.query(
+      `DELETE FROM module_status
+         WHERE enrollment_id = $1`,
+      [enrollmentId]
+    );
+
+    await client.query(
+      `DELETE FROM quiz_responses
+         WHERE user_id = $1
+           AND quiz_id IN (
+             SELECT id FROM quizzes WHERE revision_id IN (
+               SELECT id FROM revisions WHERE module_id IN (
+                 SELECT id FROM modules WHERE course_id = $2
+               )
+             )
+           )`,
+      [userId, courseId]
+    );
+
+    await client.query("COMMIT");
+    return res.status(200).json({ success: true });
+  } catch (err) {
+    await client.query("ROLLBACK");
+    console.error("Error unenrolling user:", err);
+    return res.status(500).json({ message: "Server error" });
+  } finally {
+    client.release();
+  }
+});
+
+router.post("/complete-course", async (req, res) => {
+  const { auth } = req.cookies;
+  if (!auth) return res.status(401).json({ message: "Not authenticated" });
+
+  let session;
+  try {
+    session = JSON.parse(auth);
+  } catch {
+    return res.status(400).json({ message: "Invalid session data" });
+  }
+
+  const userId = session.userId;
+  const { courseId } = req.body;
+  if (!courseId) {
+    return res.status(400).json({ message: "courseId is required" });
+  }
+
+  const client = await pool.connect();
+  try {
+    await client.query("BEGIN");
+
+    const modRes = await client.query(
+      `SELECT COUNT(*) AS total_modules,
+              SUM(CASE WHEN ms.status = 'completed' THEN 1 ELSE 0 END) AS completed_modules
+         FROM modules m
+         JOIN module_status ms ON ms.module_id = m.id
+        WHERE m.course_id = $1
+          AND ms.enrollment_id = (  
+            SELECT id FROM enrollments WHERE user_id = $2 AND course_id = $1
+          )`,
+      [courseId, userId]
+    );
+
+    const totalModules = modRes.rows[0].total_modules;
+    const completedModules = modRes.rows[0].completed_modules;
+    if (totalModules !== completedModules) {
+      await client.query("ROLLBACK");
+      return res.status(400).json({
+        message: "Cannot complete course - not all modules are completed",
+      });
+    }
+
+    await client.query(
+      `UPDATE enrollments
+         SET status = 'completed',
+             completed_at = NOW()
+       WHERE user_id = $1
+         AND course_id = $2`,
+      [userId, courseId]
+    );
+
+    await client.query("COMMIT");
+    return res.status(200).json({ success: true });
+  } catch (err) {
+    await client.query("ROLLBACK");
+    console.error("Error completing course:", err);
+    return res.status(500).json({ message: "Server error" });
+  } finally {
+    client.release();
+  }
+});
+
+router.post("/uncomplete-course", async (req, res) => {
+  const { auth } = req.cookies;
+  if (!auth) return res.status(401).json({ message: "Not authenticated" });
+
+  let session;
+  try {
+    session = JSON.parse(auth);
+  } catch {
+    return res.status(400).json({ message: "Invalid session data" });
+  }
+
+  const userId = session.userId;
+  const { courseId } = req.body;
+  if (!courseId) {
+    return res.status(400).json({ message: "courseId is required" });
+  }
+
+  const client = await pool.connect();
+  try {
+    await client.query("BEGIN");
+
+    await client.query(
+      `UPDATE enrollments
+         SET status = 'enrolled',
+             completed_at = NULL
+       WHERE user_id = $1
+         AND course_id = $2`,
+      [userId, courseId]
+    );
+
+    await client.query("COMMIT");
+    return res.status(200).json({ success: true });
+  } catch (err) {
+    await client.query("ROLLBACK");
+    console.error("Error completing course:", err);
+    return res.status(500).json({ message: "Server error" });
+  } finally {
+    client.release();
+  }
+});
+
+router.post("/is-enrolled", async (req, res) => {
+  const { auth } = req.cookies;
+  if (!auth) return res.status(401).json({ message: "Not authenticated" });
+
+  let session;
+  try {
+    session = JSON.parse(auth);
+  } catch {
+    return res.status(400).json({ message: "Invalid session data" });
+  }
+
+  const userId = session.userId;
+  const isOrganisationAdmin = session.organisation?.role === "admin";
+
+  if (isOrganisationAdmin) {
+    return res.status(200).json({
+      enrolled: true,
+    });
+  }
+
+  const { courseId } = req.body;
+  if (!courseId) {
+    return res.status(400).json({ message: "courseId is required" });
+  }
+
+  const client = await pool.connect();
+  try {
+    await client.query("BEGIN");
+
+    const enrollRes = await client.query(
+      `SELECT 1 FROM enrollments
+         WHERE user_id = $1
+           AND course_id = $2
+         LIMIT 1`,
+      [userId, courseId]
+    );
+
+    await client.query("COMMIT");
+    return res.status(200).json({
+      enrolled: enrollRes.rows.length > 0,
+    });
+  } catch (err) {
+    await client.query("ROLLBACK");
+    console.error("Error checking enrollment:", err);
+    return res.status(500).json({ message: "Server error" });
+  } finally {
+    client.release();
+  }
+});
+
+// helper
+async function submitQuizResponse(client, userId, quizId, answers) {
+  const respRes = await client.query(
+    `INSERT INTO quiz_responses (user_id, quiz_id)
+       VALUES ($1, $2)
+     RETURNING id`,
+    [userId, quizId]
+  );
+  const responseId = respRes.rows[0].id;
+
+  for (const ans of answers) {
+    const { questionId, selectedOptionIds } = ans;
+    if (!questionId || !Array.isArray(selectedOptionIds)) {
+      throw new Error(
+        "Each answer must have questionId and selectedOptionIds[]"
+      );
+    }
+    for (const optId of selectedOptionIds) {
+      await client.query(
+        `INSERT INTO quiz_answers
+           (response_id, question_id, selected_option_id)
+         VALUES ($1, $2, $3)`,
+        [responseId, questionId, optId]
+      );
+    }
+  }
+
+  const revisionRes = await client.query(
+    `SELECT revision_id
+       FROM quizzes
+      WHERE id = $1`,
+    [quizId]
+  );
+
+  const revisionId = revisionRes.rows[0].revision_id;
+
+  const moduleRes = await client.query(
+    `SELECT module_id
+       FROM revisions
+      WHERE id = $1`,
+    [revisionId]
+  );
+
+  const moduleId = moduleRes.rows[0].module_id;
+
+  const enrollmentRes = await client.query(
+    `SELECT id
+       FROM enrollments
+      WHERE user_id = $1 AND course_id = (
+        SELECT course_id FROM modules WHERE id = $2
+      )`,
+    [userId, moduleId]
+  );
+
+  const enrollmentId = enrollmentRes.rows[0].id;
+
+  await client.query(
+    `UPDATE module_status
+       SET status = 'completed',
+           completed_at = NOW()
+     WHERE enrollment_id = $1 AND module_id = $2`,
+    [enrollmentId, moduleId]
+  );
+
+  return responseId;
+}
+
+// helper
+async function gradeQuizResponse(client, responseId) {
+  const userAnsRes = await client.query(
+    `SELECT question_id,
+            ARRAY_AGG(selected_option_id) AS selected_option_ids
+       FROM quiz_answers
+      WHERE response_id = $1
+      GROUP BY question_id`,
+    [responseId]
+  );
+  const userAnswers = userAnsRes.rows;
+  const questionIds = userAnswers.map((r) => r.question_id);
+
+  const correctMap = {};
+  if (questionIds.length) {
+    const correctRes = await client.query(
+      `SELECT question_id,
+              ARRAY_AGG(id) AS correct_option_ids
+         FROM question_options
+        WHERE question_id = ANY($1) AND is_correct = TRUE
+        GROUP BY question_id`,
+      [questionIds]
+    );
+    for (const row of correctRes.rows) {
+      correctMap[row.question_id] = row.correct_option_ids;
+    }
+  }
+
+  const optionTextMap = {};
+  if (questionIds.length) {
+    const optsRes = await client.query(
+      `SELECT id, option_text
+         FROM question_options
+        WHERE question_id = ANY($1)`,
+      [questionIds]
+    );
+    for (const { id, option_text } of optsRes.rows) {
+      optionTextMap[id] = option_text;
+    }
+  }
+
+  return userAnswers.map(({ question_id, selected_option_ids }) => {
+    const correctIds = correctMap[question_id] || [];
+    const selectedIds = selected_option_ids || [];
+
+    const correctOptions = correctIds.map((id) => ({
+      id,
+      text: optionTextMap[id] || "",
+    }));
+    const selectedOptions = selectedIds.map((id) => ({
+      id,
+      text: optionTextMap[id] || "",
+    }));
+
+    const isCorrect =
+      correctIds.length === selectedIds.length &&
+      correctIds.every((id) => selectedIds.includes(id));
+
+    return {
+      questionId: question_id,
+      correctOptions,
+      selectedOptions,
+      isCorrect,
+    };
+  });
+}
+
+router.post("/submit-quiz", async (req, res) => {
+  const { auth } = req.cookies;
+  if (!auth) return res.status(401).json({ message: "Not authenticated" });
+  let session;
+  try {
+    session = JSON.parse(auth);
+  } catch {
+    return res.status(400).json({ message: "Invalid session data" });
+  }
+  const { quizId, answers } = req.body;
+  const client = await pool.connect();
+  try {
+    await client.query("BEGIN");
+    const responseId = await submitQuizResponse(
+      client,
+      userId,
+      quizId,
+      answers
+    );
+    await client.query("COMMIT");
+    return res.status(201).json({ success: true, responseId });
+  } catch (err) {
+    await client.query("ROLLBACK");
+    console.error(err);
+    return res.status(500).json({ message: "Server error" });
+  } finally {
+    client.release();
+  }
+});
+
+router.post("/grade-quiz", async (req, res) => {
+  const { auth } = req.cookies;
+  if (!auth) return res.status(401).json({ message: "Not authenticated" });
+  let session;
+  try {
+    session = JSON.parse(auth);
+  } catch {
+    return res.status(400).json({ message: "Invalid session data" });
+  }
+  const { responseId } = req.body;
+  const client = await pool.connect();
+  try {
+    await client.query("BEGIN");
+    const results = await gradeQuizResponse(client, responseId);
+    await client.query("COMMIT");
+    return res.status(200).json({ results });
+  } catch (err) {
+    await client.query("ROLLBACK");
+    console.error(err);
+    return res.status(500).json({ message: "Server error" });
+  } finally {
+    client.release();
+  }
+});
+
+router.post("/submit-and-grade-quiz", async (req, res) => {
+  const { auth } = req.cookies;
+  if (!auth) return res.status(401).json({ message: "Not authenticated" });
+  let session;
+  try {
+    session = JSON.parse(auth);
+  } catch {
+    return res.status(400).json({ message: "Invalid session data" });
+  }
+  const userId = session.userId;
+
+  const { quizId, answers } = req.body;
+  if (!quizId || !Array.isArray(answers)) {
+    return res.status(400).json({ message: "quizId and answers[] required" });
+  }
+
+  const client = await pool.connect();
+  try {
+    await client.query("BEGIN");
+    const responseId = await submitQuizResponse(
+      client,
+      userId,
+      quizId,
+      answers
+    );
+    const results = await gradeQuizResponse(client, responseId);
+    await client.query("COMMIT");
+    return res.status(200).json({ responseId, results });
+  } catch (err) {
+    await client.query("ROLLBACK");
+    console.error("Error in submit-and-grade-quiz:", err);
+    return res.status(500).json({ message: "Server error" });
+  } finally {
+    client.release();
+  }
+});
+
+router.post("/get-latest-quiz-response", async (req, res) => {
+  const { auth } = req.cookies;
+  if (!auth) return res.status(401).json({ message: "Not authenticated" });
+  let session;
+  try {
+    session = JSON.parse(auth);
+  } catch {
+    return res.status(400).json({ message: "Invalid session data" });
+  }
+  const userId = session.userId;
+
+  const { quizId } = req.body;
+  if (!quizId) {
+    return res.status(400).json({ message: "quizId is required" });
+  }
+
+  const client = await pool.connect();
+  try {
+    await client.query("BEGIN");
+
+    const respRes = await client.query(
+      `SELECT id
+         FROM quiz_responses
+        WHERE user_id = $1
+          AND quiz_id = $2
+        ORDER BY submitted_at DESC
+        LIMIT 1`,
+      [userId, quizId]
+    );
+    if (!respRes.rows.length) {
+      await client.query("COMMIT");
+      return res.status(200).json({ responseId: null, results: null });
+    }
+
+    const responseId = respRes.rows[0].id;
+
+    const results = await gradeQuizResponse(client, responseId);
+
+    await client.query("COMMIT");
+    return res.status(200).json({ responseId, results });
+  } catch (err) {
+    await client.query("ROLLBACK");
+    console.error("Error fetching & grading quiz:", err);
+    return res.status(500).json({ message: "Server error" });
+  } finally {
+    client.release();
+  }
+});
+
+router.post("/get-module-status", async (req, res) => {
+  const { auth } = req.cookies;
+  if (!auth) return res.status(401).json({ message: "Not authenticated" });
+
+  let session;
+  try {
+    session = JSON.parse(auth);
+  } catch {
+    return res.status(400).json({ message: "Invalid session data" });
+  }
+
+  const userId = session.userId;
+  const moduleId = req.body.moduleId;
+  if (!moduleId) {
+    return res.status(400).json({ message: "moduleId is required" });
+  }
+
+  const client = await pool.connect();
+  try {
+    await client.query("BEGIN");
+
+    const courseIdRes = await client.query(
+      `SELECT course_id FROM modules WHERE id = $1`,
+      [moduleId]
+    );
+
+    const courseId = courseIdRes.rows[0]?.course_id;
+
+    const enrolmentRes = await client.query(
+      `SELECT id FROM enrollments
+         WHERE user_id = $1 AND course_id = $2`,
+      [userId, courseId]
+    );
+
+    const enrollmentId = enrolmentRes.rows[0]?.id;
+
+    const isCourseCompleted = await client.query(
+      `SELECT 1 FROM enrollments
+         WHERE id = $1 AND status = 'completed'`,
+      [enrollmentId]
+    );
+
+    const statusRes = await client.query(
+      `SELECT status FROM module_status
+         WHERE enrollment_id = $1 AND module_id = $2`,
+      [enrollmentId, moduleId]
+    );
+
+    await client.query("COMMIT");
+    return res.status(200).json({
+      status: statusRes.rows.length ? statusRes.rows[0].status : "not_started",
+      isCourseCompleted: isCourseCompleted.rows.length > 0,
+    });
+  } catch (err) {
+    await client.query("ROLLBACK");
+    console.error(err);
+    return res.status(500).json({ message: "Server error" });
+  } finally {
+    client.release();
+  }
+});
+
+router.post("/mark-module-started", async (req, res) => {
+  const { auth } = req.cookies;
+  if (!auth) return res.status(401).json({ message: "Not authenticated" });
+
+  let session;
+  try {
+    session = JSON.parse(auth);
+  } catch {
+    return res.status(400).json({ message: "Invalid session data" });
+  }
+
+  const userId = session.userId;
+  const moduleId = req.body.moduleId;
+  if (!moduleId) {
+    return res.status(400).json({ message: "moduleId is required" });
+  }
+
+  const client = await pool.connect();
+  try {
+    await client.query("BEGIN");
+
+    const courseIdRes = await client.query(
+      `SELECT course_id FROM modules WHERE id = $1`,
+      [moduleId]
+    );
+
+    const courseId = courseIdRes.rows[0]?.course_id;
+
+    const enrolmentRes = await client.query(
+      `SELECT id FROM enrollments
+         WHERE user_id = $1 AND course_id = $2`,
+      [userId, courseId]
+    );
+
+    const enrollmentId = enrolmentRes.rows[0]?.id;
+
+    const statusRes = await client.query(
+      `SELECT status FROM module_status
+         WHERE enrollment_id = $1 AND module_id = $2`,
+      [enrollmentId, moduleId]
+    );
+
+    await client.query(
+      `UPDATE module_status
+         SET status = 'in_progress',
+              started_at = NOW()
+         WHERE enrollment_id = $1 AND module_id = $2`,
+      [enrollmentId, moduleId]
+    );
+
+    await client.query("COMMIT");
+    return res.status(200).json({ status: "in_progress" });
+  } catch (err) {
+    await client.query("ROLLBACK");
+    console.error(err);
+    return res.status(500).json({ message: "Server error" });
+  } finally {
+    client.release();
+  }
+});
+
+router.post("/mark-module-completed", async (req, res) => {
+  const { auth } = req.cookies;
+  if (!auth) return res.status(401).json({ message: "Not authenticated" });
+
+  let session;
+  try {
+    session = JSON.parse(auth);
+  } catch {
+    return res.status(400).json({ message: "Invalid session data" });
+  }
+
+  const userId = session.userId;
+  const moduleId = req.body.moduleId;
+  if (!moduleId) {
+    return res.status(400).json({ message: "moduleId is required" });
+  }
+
+  const client = await pool.connect();
+  try {
+    await client.query("BEGIN");
+
+    const courseIdRes = await client.query(
+      `SELECT course_id FROM modules WHERE id = $1`,
+      [moduleId]
+    );
+
+    const courseId = courseIdRes.rows[0]?.course_id;
+
+    const enrolmentRes = await client.query(
+      `SELECT id FROM enrollments
+         WHERE user_id = $1 AND course_id = $2`,
+      [userId, courseId]
+    );
+
+    const enrollmentId = enrolmentRes.rows[0]?.id;
+
+    const statusRes = await client.query(
+      `SELECT status FROM module_status
+         WHERE enrollment_id = $1 AND module_id = $2`,
+      [enrollmentId, moduleId]
+    );
+
+    if (statusRes.rows.length && statusRes.rows[0].status !== "in_progress") {
+      await client.query("ROLLBACK");
+      return res.status(400).json({
+        message: "Module must be marked as in_progress before completing",
+      });
+    }
+
+    await client.query(
+      `UPDATE module_status
+         SET status = 'completed',
+            completed_at = NOW()
+         WHERE enrollment_id = $1 AND module_id = $2`,
+      [enrollmentId, moduleId]
+    );
+
+    await client.query("COMMIT");
+    return res.status(200).json({ status: "in_progress" });
+  } catch (err) {
+    await client.query("ROLLBACK");
+    console.error(err);
+    return res.status(500).json({ message: "Server error" });
+  } finally {
+    client.release();
+  }
+});
+
 module.exports = router;
