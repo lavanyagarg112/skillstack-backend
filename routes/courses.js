@@ -971,6 +971,43 @@ async function submitQuizResponse(client, userId, quizId, answers) {
     }
   }
 
+  const revisionRes = await client.query(
+    `SELECT revision_id
+       FROM quizzes
+      WHERE id = $1`,
+    [quizId]
+  );
+
+  const revisionId = revisionRes.rows[0].revision_id;
+
+  const moduleRes = await client.query(
+    `SELECT module_id
+       FROM revisions
+      WHERE id = $1`,
+    [revisionId]
+  );
+
+  const moduleId = moduleRes.rows[0].module_id;
+
+  const enrollmentRes = await client.query(
+    `SELECT id
+       FROM enrollments
+      WHERE user_id = $1 AND course_id = (
+        SELECT course_id FROM modules WHERE id = $2
+      )`,
+    [userId, moduleId]
+  );
+
+  const enrollmentId = enrollmentRes.rows[0].id;
+
+  await client.query(
+    `UPDATE module_status
+       SET status = 'completed',
+           completed_at = NOW()
+     WHERE enrollment_id = $1 AND module_id = $2`,
+    [enrollmentId, moduleId]
+  );
+
   return responseId;
 }
 
@@ -1281,7 +1318,8 @@ router.post("/mark-module-started", async (req, res) => {
 
     await client.query(
       `UPDATE module_status
-         SET status = 'in_progress'
+         SET status = 'in_progress',
+              started_at = NOW()
          WHERE enrollment_id = $1 AND module_id = $2`,
       [enrollmentId, moduleId]
     );
@@ -1348,7 +1386,8 @@ router.post("/mark-module-completed", async (req, res) => {
 
     await client.query(
       `UPDATE module_status
-         SET status = 'completed'
+         SET status = 'completed',
+            completed_at = NOW()
          WHERE enrollment_id = $1 AND module_id = $2`,
       [enrollmentId, moduleId]
     );
