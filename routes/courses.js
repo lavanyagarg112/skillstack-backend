@@ -113,8 +113,27 @@ router.get("/", async (req, res) => {
     await client.query("BEGIN");
 
     const courseRes = await client.query(
-      `SELECT c.id, c.name, c.description FROM courses c
-      WHERE c.organisation_id = $1`,
+      `
+      SELECT
+        c.id,
+        c.name,
+        c.description,
+        -- aggregate tags into an array of { id, name }
+        COALESCE(
+          JSON_AGG(
+            JSON_BUILD_OBJECT('id', t.id, 'name', t.name)
+          ) FILTER (WHERE t.id IS NOT NULL),
+          '[]'
+        ) AS tags
+      FROM courses c
+      LEFT JOIN course_tags ct
+        ON ct.course_id = c.id
+      LEFT JOIN tags t
+        ON t.id = ct.tag_id
+      WHERE c.organisation_id = $1
+      GROUP BY c.id, c.name, c.description
+      ORDER BY c.name
+      `,
       [organisationId]
     );
 
