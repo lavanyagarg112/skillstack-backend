@@ -58,10 +58,8 @@ router.post("/", async (req, res) => {
         console.log("Processing tag:", t);
 
         if (typeof t === "number") {
-          // existing tag
           tagId = t;
         } else {
-          // new tag name: insert (or on-conflict do nothing) and grab its id
           const { rows } = await client.query(
             `INSERT INTO tags (name)
          VALUES ($1)
@@ -286,19 +284,37 @@ router.put("/", async (req, res) => {
       throw new Error("Failed to update course");
     }
 
-    const courseId = courseRes.rows[0].id;
+    // const courseId = courseRes.rows[0].id;
 
     if (updateTags) {
       await client.query(`DELETE FROM course_tags WHERE course_id = $1`, [
         courseId,
       ]);
 
-      for (const tag of courseTags) {
-        await client.query(
-          `INSERT INTO course_tags (course_id, tag_id)
-          VALUES ($1, $2)`,
-          [courseId, tag]
-        );
+      if (courseTags.length) {
+        for (const t of courseTags) {
+          let tagId;
+          if (typeof t === "number") {
+            tagId = t;
+          } else {
+            const { rows } = await client.query(
+              `INSERT INTO tags (name)
+         VALUES ($1)
+       ON CONFLICT (name) DO UPDATE SET name = EXCLUDED.name
+       RETURNING id`,
+              [t]
+            );
+            tagId = rows[0].id;
+          }
+
+          // finally link course ↔ tag
+          await client.query(
+            `INSERT INTO course_tags (course_id, tag_id)
+       VALUES ($1, $2)
+     ON CONFLICT DO NOTHING`,
+            [courseId, tagId]
+          );
+        }
       }
     }
 
