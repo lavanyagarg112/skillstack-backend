@@ -1003,7 +1003,13 @@ router.get("/all-user-courses", async (req, res) => {
         c.description,
         COUNT(m.id)                             AS total_modules,
         COUNT(ms.id) FILTER (WHERE ms.status = 'completed')
-                                                AS completed_modules
+                                                AS completed_modules,
+      COALESCE(
+          JSON_AGG(
+            JSON_BUILD_OBJECT('id', t.id, 'name', t.name)
+          ) FILTER (WHERE t.id IS NOT NULL),
+          '[]'
+        ) AS tags
       FROM courses c
         JOIN enrollments e
           ON e.course_id = c.id
@@ -1011,6 +1017,10 @@ router.get("/all-user-courses", async (req, res) => {
         AND e.status    = 'enrolled'
         LEFT JOIN modules m
           ON m.course_id = c.id
+        LEFT JOIN course_tags ct
+        ON ct.course_id = c.id
+        LEFT JOIN tags t
+          ON t.id = ct.tag_id
         LEFT JOIN module_status ms
           ON ms.module_id     = m.id
         AND ms.enrollment_id = e.id
@@ -1028,12 +1038,22 @@ router.get("/all-user-courses", async (req, res) => {
         c.description,
         COUNT(m.id)                             AS total_modules,
         COUNT(ms.id) FILTER (WHERE ms.status = 'completed')
-                                                AS completed_modules
+                                                AS completed_modules,
+        COALESCE(
+          JSON_AGG(
+            JSON_BUILD_OBJECT('id', t.id, 'name', t.name)
+          ) FILTER (WHERE t.id IS NOT NULL),
+          '[]'
+        ) AS tagss
       FROM courses c
         JOIN enrollments e
           ON e.course_id = c.id
         AND e.user_id   = $1
         AND e.status    = 'completed'
+        LEFT JOIN course_tags ct
+        ON ct.course_id = c.id
+        LEFT JOIN tags t
+          ON t.id = ct.tag_id
         LEFT JOIN modules m
           ON m.course_id = c.id
         LEFT JOIN module_status ms
@@ -1047,14 +1067,25 @@ router.get("/all-user-courses", async (req, res) => {
     // 3) Others in same org, not enrolled at all
     const otherRes = await client.query(
       `
-      SELECT c.id, c.name, c.description
+      SELECT c.id, c.name, c.description,
+      COALESCE(
+          JSON_AGG(
+            JSON_BUILD_OBJECT('id', t.id, 'name', t.name)
+          ) FILTER (WHERE t.id IS NOT NULL),
+          '[]'
+        ) AS tags
       FROM courses c
+      LEFT JOIN course_tags ct
+        ON ct.course_id = c.id
+      LEFT JOIN tags t
+        ON t.id = ct.tag_id
       WHERE c.organisation_id = $1
         AND c.id NOT IN (
           SELECT course_id
           FROM enrollments
           WHERE user_id = $2
         )
+        GROUP BY c.id, c.name, c.description
       `,
       [organisationId, userId]
     );
