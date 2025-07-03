@@ -55,7 +55,6 @@ router.post("/", async (req, res) => {
       const courseId = courseRes.rows[0].id;
       for (const t of courseTags) {
         let tagId;
-        console.log("Processing tag:", t);
 
         if (typeof t === "number") {
           tagId = t;
@@ -355,7 +354,27 @@ router.post("/get-modules", async (req, res) => {
     await client.query("BEGIN");
 
     const modulesRes = await client.query(
-      `SELECT id, title, module_type, position FROM modules WHERE course_id = $1`,
+      `
+  SELECT
+    m.id,
+    m.title,
+    m.module_type,
+    m.position,
+    COALESCE(
+      JSON_AGG(
+        JSON_BUILD_OBJECT('id', t.id, 'name', t.name)
+      ) FILTER (WHERE t.id IS NOT NULL),
+      '[]'
+    ) AS tags
+  FROM modules m
+  LEFT JOIN module_tags mt
+    ON mt.module_id = m.id
+  LEFT JOIN tags t
+    ON t.id = mt.tag_id
+  WHERE m.course_id = $1
+  GROUP BY m.id
+  ORDER BY m.position
+  `,
       [courseId]
     );
 
@@ -383,14 +402,8 @@ router.post("/add-module", upload.single("file"), async (req, res) => {
     return res.status(403).json({ message: "Forbidden" });
   }
 
-  const {
-    courseId,
-    name,
-    type,
-    description = "",
-    questions,
-    moduleTags,
-  } = req.body;
+  const { courseId, name, type, description = "", questions } = req.body;
+  let moduleTags = req.body.moduleTags || [];
   if (!courseId || !name || !type) {
     return res
       .status(400)
@@ -405,6 +418,10 @@ router.post("/add-module", upload.single("file"), async (req, res) => {
     return res
       .status(400)
       .json({ message: "file is required for non-quiz modules" });
+  }
+
+  if (typeof moduleTags === "string") {
+    moduleTags = JSON.parse(moduleTags);
   }
 
   const client = await pool.connect();
@@ -434,11 +451,28 @@ router.post("/add-module", upload.single("file"), async (req, res) => {
     const module_id = moduleRes.rows[0].id;
 
     if (moduleTags && moduleTags.length) {
-      for (const tag of moduleTags) {
+      for (const t of moduleTags) {
+        let tagId;
+
+        if (!t.isNew) {
+          tagId = t.id;
+        } else {
+          const { rows } = await client.query(
+            `INSERT INTO tags (name)
+         VALUES ($1)
+       ON CONFLICT (name) DO UPDATE SET name = EXCLUDED.name
+       RETURNING id`,
+            [t.name]
+          );
+          tagId = rows[0].id;
+        }
+
+        // finally link course ↔ tag
         await client.query(
           `INSERT INTO module_tags (module_id, tag_id)
-             VALUES ($1, $2)`,
-          [module_id, tag]
+       VALUES ($1, $2)
+     ON CONFLICT DO NOTHING`,
+          [module_id, tagId]
         );
       }
     }
@@ -660,10 +694,14 @@ router.post("/get-module", async (req, res) => {
             questions,
           };
           module.file_url = null; // quiz modules don't have file_url
-          module.tags = moduleTagsRes.rows || [];
         }
       }
     }
+
+    module.tags = moduleTagsRes.rows.map((r) => ({
+      id: r.tag_id,
+      name: r.tag_name,
+    }));
 
     await client.query("COMMIT");
     return res.status(200).json(module);
@@ -696,14 +734,19 @@ router.put("/update-module", upload.single("file"), async (req, res) => {
     description = "",
     type,
     questions,
-    moduleTags,
     updateTags = false,
   } = req.body;
+
+  let moduleTags = req.body.moduleTags || [];
 
   if (!moduleId || !name) {
     return res
       .status(400)
       .json({ message: "moduleId, name and type are required" });
+  }
+
+  if (typeof moduleTags === "string") {
+    moduleTags = JSON.parse(moduleTags);
   }
 
   const file = req.file; // may be undefined for quiz
@@ -734,20 +777,38 @@ router.put("/update-module", upload.single("file"), async (req, res) => {
     }
 
     if (updateTags) {
+      await client.query(
+        `DELETE FROM module_tags
+         WHERE module_id = $1`,
+        [moduleId]
+      );
       if (moduleTags && moduleTags.length) {
-        await client.query(`DELETE FROM module_tags WHERE module_id = $1`, [
-          moduleId,
-        ]);
-        for (const tag of moduleTags) {
+        for (const t of moduleTags) {
+          let tagId;
+
+          if (!t.isNew) {
+            tagId = t.id;
+          } else {
+            const { rows } = await client.query(
+              `INSERT INTO tags (name)
+         VALUES ($1)
+       ON CONFLICT (name) DO UPDATE SET name = EXCLUDED.name
+       RETURNING id`,
+              [t.name]
+            );
+            tagId = rows[0].id;
+          }
+
+          // finally link course ↔ tag
           await client.query(
             `INSERT INTO module_tags (module_id, tag_id)
-             VALUES ($1, $2)`,
-            [moduleId, tag]
+       VALUES ($1, $2)
+     ON CONFLICT DO NOTHING`,
+            [moduleId, tagId]
           );
         }
       }
     }
-
     const orignalTypeRes = await client.query(
       `SELECT module_type FROM modules WHERE id = $1`,
       [moduleId]
