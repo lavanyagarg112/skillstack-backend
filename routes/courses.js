@@ -54,27 +54,14 @@ router.post("/", async (req, res) => {
     if (courseTags.length) {
       const courseId = courseRes.rows[0].id;
       for (const t of courseTags) {
-        let tagId;
-
-        if (typeof t === "number") {
-          tagId = t;
-        } else {
-          const { rows } = await client.query(
-            `INSERT INTO tags (name)
-         VALUES ($1)
-       ON CONFLICT (name) DO UPDATE SET name = EXCLUDED.name
-       RETURNING id`,
-            [t]
-          );
-          tagId = rows[0].id;
+        if (typeof t !== "number") {
+          throw new Error("Invalid tag ID");
         }
-
-        // finally link course ↔ tag
         await client.query(
           `INSERT INTO course_tags (course_id, tag_id)
-       VALUES ($1, $2)
-     ON CONFLICT DO NOTHING`,
-          [courseId, tagId]
+         VALUES ($1, $2)
+       ON CONFLICT DO NOTHING`,
+          [courseId, t]
         );
       }
     }
@@ -291,27 +278,16 @@ router.put("/", async (req, res) => {
       ]);
 
       if (courseTags.length) {
+        const courseId = courseRes.rows[0].id;
         for (const t of courseTags) {
-          let tagId;
-          if (typeof t === "number") {
-            tagId = t;
-          } else {
-            const { rows } = await client.query(
-              `INSERT INTO tags (name)
-         VALUES ($1)
-       ON CONFLICT (name) DO UPDATE SET name = EXCLUDED.name
-       RETURNING id`,
-              [t]
-            );
-            tagId = rows[0].id;
+          if (typeof t !== "number") {
+            throw new Error("Invalid tag ID");
           }
-
-          // finally link course ↔ tag
           await client.query(
             `INSERT INTO course_tags (course_id, tag_id)
-       VALUES ($1, $2)
-     ON CONFLICT DO NOTHING`,
-            [courseId, tagId]
+         VALUES ($1, $2)
+       ON CONFLICT DO NOTHING`,
+            [courseId, t]
           );
         }
       }
@@ -452,27 +428,14 @@ router.post("/add-module", upload.single("file"), async (req, res) => {
 
     if (moduleTags && moduleTags.length) {
       for (const t of moduleTags) {
-        let tagId;
-
-        if (!t.isNew) {
-          tagId = t.id;
-        } else {
-          const { rows } = await client.query(
-            `INSERT INTO tags (name)
-         VALUES ($1)
-       ON CONFLICT (name) DO UPDATE SET name = EXCLUDED.name
-       RETURNING id`,
-            [t.name]
-          );
-          tagId = rows[0].id;
+        if (typeof t.id !== "number") {
+          throw new Error("Invalid tag ID");
         }
-
-        // finally link course ↔ tag
         await client.query(
           `INSERT INTO module_tags (module_id, tag_id)
        VALUES ($1, $2)
      ON CONFLICT DO NOTHING`,
-          [module_id, tagId]
+          [module_id, t.id]
         );
       }
     }
@@ -784,27 +747,14 @@ router.put("/update-module", upload.single("file"), async (req, res) => {
       );
       if (moduleTags && moduleTags.length) {
         for (const t of moduleTags) {
-          let tagId;
-
-          if (!t.isNew) {
-            tagId = t.id;
-          } else {
-            const { rows } = await client.query(
-              `INSERT INTO tags (name)
-         VALUES ($1)
-       ON CONFLICT (name) DO UPDATE SET name = EXCLUDED.name
-       RETURNING id`,
-              [t.name]
-            );
-            tagId = rows[0].id;
+          if (typeof t.id !== "number") {
+            throw new Error("Invalid tag ID");
           }
-
-          // finally link course ↔ tag
           await client.query(
             `INSERT INTO module_tags (module_id, tag_id)
        VALUES ($1, $2)
      ON CONFLICT DO NOTHING`,
-            [moduleId, tagId]
+            [moduleId, t.id]
           );
         }
       }
@@ -1913,6 +1863,41 @@ router.get("/tags", async (req, res) => {
   } catch (err) {
     console.error(err);
     res.status(500).json({ message: "Server error" });
+  } finally {
+    client.release();
+  }
+});
+
+router.delete("/delete-tag", async (req, res) => {
+  const { auth } = req.cookies;
+  if (!auth) return res.status(401).json({ message: "Not authenticated" });
+
+  let session;
+  try {
+    session = JSON.parse(auth);
+  } catch {
+    return res.status(400).json({ message: "Invalid session data" });
+  }
+
+  const isAdmin = session.organisation?.role === "admin";
+  if (!isAdmin) {
+    return res.status(403).json({ message: "Forbidden" });
+  }
+  const { tagId } = req.body;
+  if (!tagId) {
+    return res.status(400).json({ message: "tagId is required" });
+  }
+
+  const client = await pool.connect();
+  try {
+    await client.query("BEGIN");
+    await client.query(`DELETE FROM tags WHERE id = $1`, [tagId]);
+    await client.query("COMMIT");
+    return res.status(200).json({ success: true });
+  } catch (err) {
+    await client.query("ROLLBACK");
+    console.error(err);
+    return res.status(500).json({ message: "Server error" });
   } finally {
     client.release();
   }
