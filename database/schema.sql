@@ -269,4 +269,29 @@ CREATE TABLE roadmap_items (
   PRIMARY KEY(roadmap_id, material_id)
 );
 
+---
+
+  -- Table to store onboarding questions
+  CREATE TABLE onboarding_questions (
+    id            SERIAL PRIMARY KEY,
+    question_text TEXT NOT NULL,
+    position      INTEGER NOT NULL DEFAULT 0
+  );
+
+  -- Table to store answer options for each question
+  CREATE TABLE onboarding_question_options (
+    id           SERIAL PRIMARY KEY,
+    question_id  INTEGER NOT NULL REFERENCES onboarding_questions(id) ON DELETE CASCADE,
+    option_text  TEXT NOT NULL,
+    tag_id       INTEGER NOT NULL REFERENCES tags(id) ON DELETE CASCADE
+  );
+
+  -- Table to store user responses
+  CREATE TABLE onboarding_responses (
+    user_id   INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    option_id INTEGER NOT NULL REFERENCES onboarding_question_options(id) ON DELETE CASCADE,
+    PRIMARY KEY(user_id, option_id)
+  );
+
+
 COMMIT;
