@@ -1868,4 +1868,39 @@ router.get("/tags", async (req, res) => {
   }
 });
 
+router.delete("/delete-tag", async (req, res) => {
+  const { auth } = req.cookies;
+  if (!auth) return res.status(401).json({ message: "Not authenticated" });
+
+  let session;
+  try {
+    session = JSON.parse(auth);
+  } catch {
+    return res.status(400).json({ message: "Invalid session data" });
+  }
+
+  const isAdmin = session.organisation?.role === "admin";
+  if (!isAdmin) {
+    return res.status(403).json({ message: "Forbidden" });
+  }
+  const { tagId } = req.body;
+  if (!tagId) {
+    return res.status(400).json({ message: "tagId is required" });
+  }
+
+  const client = await pool.connect();
+  try {
+    await client.query("BEGIN");
+    await client.query(`DELETE FROM tags WHERE id = $1`, [tagId]);
+    await client.query("COMMIT");
+    return res.status(200).json({ success: true });
+  } catch (err) {
+    await client.query("ROLLBACK");
+    console.error(err);
+    return res.status(500).json({ message: "Server error" });
+  } finally {
+    client.release();
+  }
+});
+
 module.exports = router;
