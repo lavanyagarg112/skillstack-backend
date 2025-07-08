@@ -5,6 +5,7 @@ const orgRoutes = require("./routes/orgs");
 const courseRoutes = require("./routes/courses");
 const userRoutes = require("./routes/users");
 const reportsRoutes = require("./routes/reports");
+const onboardingRoutes = require("./routes/onboarding");
 const pool = require("./database/db");
 const app = express();
 const PORT = process.env.PORT || 4000;
@@ -19,7 +20,6 @@ app.use("/uploads", express.static(uploadsDir));
 app.use(express.json());
 app.use(cookieParser());
 
-// optional CORS settings if Next.js runs on a different origin
 app.use((req, res, next) => {
   res.header("Access-Control-Allow-Origin", "http://localhost:3000");
   res.header("Access-Control-Allow-Credentials", "true");
@@ -27,7 +27,6 @@ app.use((req, res, next) => {
   next();
 });
 
-// your existing endpoints
 app.get("/", (req, res) =>
   res.send("Welcome to PostgreSQL with Node.js and Express!")
 );
@@ -41,12 +40,12 @@ app.get("/checkconnection", async (req, res) => {
   }
 });
 
-// mount all auth routes under /api
 app.use("/api", authRoutes);
 app.use("/api/orgs", orgRoutes);
 app.use("/api/courses", courseRoutes);
 app.use("/api/users", userRoutes);
 app.use("/api/reports", reportsRoutes);
+app.use("/api/onboarding", onboardingRoutes);
 
 app.listen(PORT, () => {
   console.log(`Server running on http://localhost:${PORT}`);
