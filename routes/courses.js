@@ -31,6 +31,7 @@ router.post("/", async (req, res) => {
   }
   const courseName = req.body.courseName;
   const courseDescription = req.body.description || "";
+  const courseTags = req.body.tags || [];
   if (!courseName) {
     return res.status(400).json({ message: "courseName is required" });
   }
@@ -48,6 +49,21 @@ router.post("/", async (req, res) => {
 
     if (!courseRes.rows.length) {
       throw new Error("Failed to create course");
+    }
+
+    if (courseTags.length) {
+      const courseId = courseRes.rows[0].id;
+      for (const t of courseTags) {
+        if (typeof t !== "number") {
+          throw new Error("Invalid tag ID");
+        }
+        await client.query(
+          `INSERT INTO course_tags (course_id, tag_id)
+         VALUES ($1, $2)
+       ON CONFLICT DO NOTHING`,
+          [courseId, t]
+        );
+      }
     }
 
     await client.query("COMMIT");
@@ -81,8 +97,27 @@ router.get("/", async (req, res) => {
     await client.query("BEGIN");
 
     const courseRes = await client.query(
-      `SELECT c.id, c.name, c.description FROM courses c
-      WHERE c.organisation_id = $1`,
+      `
+      SELECT
+        c.id,
+        c.name,
+        c.description,
+        -- aggregate tags into an array of { id, name }
+        COALESCE(
+          JSON_AGG(
+            JSON_BUILD_OBJECT('id', t.id, 'name', t.name)
+          ) FILTER (WHERE t.id IS NOT NULL),
+          '[]'
+        ) AS tags
+      FROM courses c
+      LEFT JOIN course_tags ct
+        ON ct.course_id = c.id
+      LEFT JOIN tags t
+        ON t.id = ct.tag_id
+      WHERE c.organisation_id = $1
+      GROUP BY c.id, c.name, c.description
+      ORDER BY c.name
+      `,
       [organisationId]
     );
 
@@ -128,11 +163,19 @@ router.post("/get-course", async (req, res) => {
       return res.status(404).json({ message: "Course not found" });
     }
 
+    const tags = await client.query(
+      `SELECT t.id, t.name FROM course_tags ct
+      JOIN tags t ON ct.tag_id = t.id
+      WHERE ct.course_id = $1`,
+      [courseId]
+    );
+
     await client.query("COMMIT");
     return res.status(200).json({
       id: courseRes.rows[0].id,
       name: courseRes.rows[0].name,
       description: courseRes.rows[0].description,
+      tags: tags.rows || [],
     });
   } catch (err) {
     await client.query("ROLLBACK");
@@ -202,6 +245,8 @@ router.put("/", async (req, res) => {
   const courseId = req.body.courseId;
   const courseName = req.body.courseName;
   const courseDescription = req.body.description || "";
+  const courseTags = req.body.tags || [];
+  const updateTags = req.body.updateTags || false;
   if (!courseId || !courseName) {
     return res
       .status(400)
@@ -223,6 +268,29 @@ router.put("/", async (req, res) => {
 
     if (!courseRes.rows.length) {
       throw new Error("Failed to update course");
+    }
+
+    // const courseId = courseRes.rows[0].id;
+
+    if (updateTags) {
+      await client.query(`DELETE FROM course_tags WHERE course_id = $1`, [
+        courseId,
+      ]);
+
+      if (courseTags.length) {
+        const courseId = courseRes.rows[0].id;
+        for (const t of courseTags) {
+          if (typeof t !== "number") {
+            throw new Error("Invalid tag ID");
+          }
+          await client.query(
+            `INSERT INTO course_tags (course_id, tag_id)
+         VALUES ($1, $2)
+       ON CONFLICT DO NOTHING`,
+            [courseId, t]
+          );
+        }
+      }
     }
 
     await client.query("COMMIT");
@@ -262,7 +330,27 @@ router.post("/get-modules", async (req, res) => {
     await client.query("BEGIN");
 
     const modulesRes = await client.query(
-      `SELECT id, title, module_type, position FROM modules WHERE course_id = $1`,
+      `
+  SELECT
+    m.id,
+    m.title,
+    m.module_type,
+    m.position,
+    COALESCE(
+      JSON_AGG(
+        JSON_BUILD_OBJECT('id', t.id, 'name', t.name)
+      ) FILTER (WHERE t.id IS NOT NULL),
+      '[]'
+    ) AS tags
+  FROM modules m
+  LEFT JOIN module_tags mt
+    ON mt.module_id = m.id
+  LEFT JOIN tags t
+    ON t.id = mt.tag_id
+  WHERE m.course_id = $1
+  GROUP BY m.id
+  ORDER BY m.position
+  `,
       [courseId]
     );
 
@@ -291,6 +379,7 @@ router.post("/add-module", upload.single("file"), async (req, res) => {
   }
 
   const { courseId, name, type, description = "", questions } = req.body;
+  let moduleTags = req.body.moduleTags || [];
   if (!courseId || !name || !type) {
     return res
       .status(400)
@@ -305,6 +394,10 @@ router.post("/add-module", upload.single("file"), async (req, res) => {
     return res
       .status(400)
       .json({ message: "file is required for non-quiz modules" });
+  }
+
+  if (typeof moduleTags === "string") {
+    moduleTags = JSON.parse(moduleTags);
   }
 
   const client = await pool.connect();
@@ -332,6 +425,20 @@ router.post("/add-module", upload.single("file"), async (req, res) => {
     }
 
     const module_id = moduleRes.rows[0].id;
+
+    if (moduleTags && moduleTags.length) {
+      for (const t of moduleTags) {
+        if (typeof t.id !== "number") {
+          throw new Error("Invalid tag ID");
+        }
+        await client.query(
+          `INSERT INTO module_tags (module_id, tag_id)
+       VALUES ($1, $2)
+     ON CONFLICT DO NOTHING`,
+          [module_id, t.id]
+        );
+      }
+    }
 
     const { rows: enrollments } = await client.query(
       `SELECT id
@@ -478,6 +585,14 @@ router.post("/get-module", async (req, res) => {
       return res.status(404).json({ message: "Module not found" });
     }
 
+    const moduleTagsRes = await client.query(
+      `SELECT tag_id, t.name AS tag_name
+         FROM module_tags mt
+         JOIN tags t ON mt.tag_id = t.id
+        WHERE mt.module_id = $1`,
+      [moduleId]
+    );
+
     const module = moduleRes.rows[0];
 
     if (module.module_type === "quiz") {
@@ -546,6 +661,11 @@ router.post("/get-module", async (req, res) => {
       }
     }
 
+    module.tags = moduleTagsRes.rows.map((r) => ({
+      id: r.tag_id,
+      name: r.tag_name,
+    }));
+
     await client.query("COMMIT");
     return res.status(200).json(module);
   } catch (err) {
@@ -571,12 +691,25 @@ router.put("/update-module", upload.single("file"), async (req, res) => {
     return res.status(403).json({ message: "Forbidden" });
   }
 
-  const { moduleId, name, description = "", type, questions } = req.body;
+  const {
+    moduleId,
+    name,
+    description = "",
+    type,
+    questions,
+    updateTags = false,
+  } = req.body;
+
+  let moduleTags = req.body.moduleTags || [];
 
   if (!moduleId || !name) {
     return res
       .status(400)
       .json({ message: "moduleId, name and type are required" });
+  }
+
+  if (typeof moduleTags === "string") {
+    moduleTags = JSON.parse(moduleTags);
   }
 
   const file = req.file; // may be undefined for quiz
@@ -606,6 +739,26 @@ router.put("/update-module", upload.single("file"), async (req, res) => {
       );
     }
 
+    if (updateTags) {
+      await client.query(
+        `DELETE FROM module_tags
+         WHERE module_id = $1`,
+        [moduleId]
+      );
+      if (moduleTags && moduleTags.length) {
+        for (const t of moduleTags) {
+          if (typeof t.id !== "number") {
+            throw new Error("Invalid tag ID");
+          }
+          await client.query(
+            `INSERT INTO module_tags (module_id, tag_id)
+       VALUES ($1, $2)
+     ON CONFLICT DO NOTHING`,
+            [moduleId, t.id]
+          );
+        }
+      }
+    }
     const orignalTypeRes = await client.query(
       `SELECT module_type FROM modules WHERE id = $1`,
       [moduleId]
@@ -795,23 +948,29 @@ router.get("/all-user-courses", async (req, res) => {
     const enrolledRes = await client.query(
       `
       SELECT
-        c.id,
-        c.name,
-        c.description,
-        COUNT(m.id)                             AS total_modules,
-        COUNT(ms.id) FILTER (WHERE ms.status = 'completed')
-                                                AS completed_modules
-      FROM courses c
-        JOIN enrollments e
-          ON e.course_id = c.id
-        AND e.user_id   = $1
-        AND e.status    = 'enrolled'
-        LEFT JOIN modules m
-          ON m.course_id = c.id
-        LEFT JOIN module_status ms
-          ON ms.module_id     = m.id
-        AND ms.enrollment_id = e.id
-      GROUP BY c.id, c.name, c.description;
+  c.id,
+  c.name,
+  c.description,
+  COUNT(m.id)                             AS total_modules,
+  COUNT(ms.id) FILTER (WHERE ms.status = 'completed')
+                                          AS completed_modules,
+  (
+    SELECT COALESCE(
+      JSON_AGG(JSON_BUILD_OBJECT('id', t2.id, 'name', t2.name)),
+      '[]'
+    )
+    FROM course_tags ct2
+    JOIN tags t2 ON t2.id = ct2.tag_id
+    WHERE ct2.course_id = c.id
+  ) AS tags
+FROM courses c
+  JOIN enrollments e  ON e.course_id = c.id  AND e.user_id = $1  AND e.status = 'enrolled'
+  LEFT JOIN modules m ON m.course_id = c.id
+  LEFT JOIN module_status ms
+    ON ms.module_id     = m.id
+   AND ms.enrollment_id = e.id
+GROUP BY c.id, c.name, c.description;
+
       `,
       [userId]
     );
@@ -820,23 +979,28 @@ router.get("/all-user-courses", async (req, res) => {
     const completedRes = await client.query(
       `
       SELECT
-        c.id,
-        c.name,
-        c.description,
-        COUNT(m.id)                             AS total_modules,
-        COUNT(ms.id) FILTER (WHERE ms.status = 'completed')
-                                                AS completed_modules
-      FROM courses c
-        JOIN enrollments e
-          ON e.course_id = c.id
-        AND e.user_id   = $1
-        AND e.status    = 'completed'
-        LEFT JOIN modules m
-          ON m.course_id = c.id
-        LEFT JOIN module_status ms
-          ON ms.module_id     = m.id
-        AND ms.enrollment_id = e.id
-      GROUP BY c.id, c.name, c.description;
+  c.id,
+  c.name,
+  c.description,
+  COUNT(m.id)                             AS total_modules,
+  COUNT(ms.id) FILTER (WHERE ms.status = 'completed')
+                                          AS completed_modules,
+  (
+    SELECT COALESCE(
+      JSON_AGG(JSON_BUILD_OBJECT('id', t2.id, 'name', t2.name)),
+      '[]'
+    )
+    FROM course_tags ct2
+    JOIN tags t2 ON t2.id = ct2.tag_id
+    WHERE ct2.course_id = c.id
+  ) AS tags
+FROM courses c
+  JOIN enrollments e  ON e.course_id = c.id  AND e.user_id = $1  AND e.status = 'completed'
+  LEFT JOIN modules m ON m.course_id = c.id
+  LEFT JOIN module_status ms
+    ON ms.module_id     = m.id
+   AND ms.enrollment_id = e.id
+GROUP BY c.id, c.name, c.description;
       `,
       [userId]
     );
@@ -844,14 +1008,25 @@ router.get("/all-user-courses", async (req, res) => {
     // 3) Others in same org, not enrolled at all
     const otherRes = await client.query(
       `
-      SELECT c.id, c.name, c.description
+      SELECT c.id, c.name, c.description,
+      COALESCE(
+          JSON_AGG(
+            JSON_BUILD_OBJECT('id', t.id, 'name', t.name)
+          ) FILTER (WHERE t.id IS NOT NULL),
+          '[]'
+        ) AS tags
       FROM courses c
+      LEFT JOIN course_tags ct
+        ON ct.course_id = c.id
+      LEFT JOIN tags t
+        ON t.id = ct.tag_id
       WHERE c.organisation_id = $1
         AND c.id NOT IN (
           SELECT course_id
           FROM enrollments
           WHERE user_id = $2
         )
+        GROUP BY c.id, c.name, c.description
       `,
       [organisationId, userId]
     );
@@ -1614,6 +1789,102 @@ router.post("/mark-module-completed", async (req, res) => {
 
     await client.query("COMMIT");
     return res.status(200).json({ status: "in_progress" });
+  } catch (err) {
+    await client.query("ROLLBACK");
+    console.error(err);
+    return res.status(500).json({ message: "Server error" });
+  } finally {
+    client.release();
+  }
+});
+
+router.post("/add-tags", async (req, res) => {
+  const { auth } = req.cookies;
+  if (!auth) return res.status(401).json({ message: "Not authenticated" });
+
+  let session;
+  try {
+    session = JSON.parse(auth);
+  } catch {
+    return res.status(400).json({ message: "Invalid session data" });
+  }
+
+  const userId = session.userId;
+  const isAdmin = session.organisation?.role === "admin";
+  if (!isAdmin) {
+    return res.status(403).json({ message: "Forbidden" });
+  }
+  const { tags } = req.body;
+  if (!Array.isArray(tags)) {
+    return res.status(400).json({ message: "tags[] are required" });
+  }
+
+  const client = await pool.connect();
+  try {
+    await client.query("BEGIN");
+    for (const tag of tags) {
+      if (!tag.name) {
+        continue; // skip if tag has no name
+      }
+      await client.query(
+        `INSERT INTO tags (name)
+         VALUES ($1)
+         ON CONFLICT (name) DO NOTHING`,
+        [tag.name]
+      );
+    }
+    await client.query("COMMIT");
+    return res.status(201).json({ success: true });
+  } catch (err) {
+    await client.query("ROLLBACK");
+    console.error(err);
+    return res.status(500).json({ message: "Server error" });
+  } finally {
+    client.release();
+  }
+});
+
+router.get("/tags", async (req, res) => {
+  const client = await pool.connect();
+  try {
+    const { rows } = await client.query(
+      `SELECT id, name FROM tags ORDER BY name`
+    );
+    res.json(rows);
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ message: "Server error" });
+  } finally {
+    client.release();
+  }
+});
+
+router.delete("/delete-tag", async (req, res) => {
+  const { auth } = req.cookies;
+  if (!auth) return res.status(401).json({ message: "Not authenticated" });
+
+  let session;
+  try {
+    session = JSON.parse(auth);
+  } catch {
+    return res.status(400).json({ message: "Invalid session data" });
+  }
+
+  const isAdmin = session.organisation?.role === "admin";
+  if (!isAdmin) {
+    return res.status(403).json({ message: "Forbidden" });
+  }
+  const { tagId } = req.body;
+  if (!tagId) {
+    return res.status(400).json({ message: "tagId is required" });
+  }
+
+  const client = await pool.connect();
+  try {
+    await client.query("BEGIN");
+    await client.query(`DELETE FROM tags WHERE id = $1`, [tagId]);
+    await client.query("COMMIT");
+    return res.status(200).json({ success: true });
   } catch (err) {
     await client.query("ROLLBACK");
     console.error(err);
