@@ -160,13 +160,13 @@ router.get("/overview", requireAdmin, async (req, res) => {
       SELECT
         c.id,
         c.name,
-        COUNT(e.*) FILTER (WHERE e.status IN ('enrolled','completed')) AS total_enrolled,
-        COUNT(e.*) FILTER (WHERE e.status = 'completed')              AS total_completed,
-        COUNT(m.*) FILTER (WHERE m.module_type = 'video')            AS videos,
-        COUNT(m.*) FILTER (WHERE m.module_type = 'quiz')             AS quizzes,
-        COUNT(m.*) FILTER (WHERE m.module_type = 'pdf')              AS pdfs,
-        COUNT(m.*) FILTER (WHERE m.module_type = 'slide')            AS slides,
-        COUNT(m.*) FILTER (WHERE m.module_type NOT IN ('video','quiz','pdf','slide')) AS others
+        COUNT(DISTINCT(e.id)) FILTER (WHERE e.status IN ('enrolled','completed')) AS total_enrolled,
+        COUNT(DISTINCT e.id) FILTER (WHERE e.status = 'completed')              AS total_completed,
+       COUNT(DISTINCT m.id) FILTER (WHERE m.module_type = 'video')            AS videos,
+        COUNT(DISTINCT m.id) FILTER (WHERE m.module_type = 'quiz')             AS quizzes,
+       COUNT(DISTINCT m.id) FILTER (WHERE m.module_type = 'pdf')              AS pdfs,
+        COUNT(DISTINCT m.id) FILTER (WHERE m.module_type = 'slide')            AS slides,
+        COUNT(DISTINCT m.id) FILTER (WHERE m.module_type NOT IN ('video','quiz','pdf','slide')) AS others
       FROM courses c
       LEFT JOIN enrollments e ON e.course_id = c.id
       LEFT JOIN modules     m ON m.course_id = c.id
