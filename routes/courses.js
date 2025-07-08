@@ -948,33 +948,29 @@ router.get("/all-user-courses", async (req, res) => {
     const enrolledRes = await client.query(
       `
       SELECT
-        c.id,
-        c.name,
-        c.description,
-        COUNT(m.id)                             AS total_modules,
-        COUNT(ms.id) FILTER (WHERE ms.status = 'completed')
-                                                AS completed_modules,
-      COALESCE(
-          JSON_AGG(
-            JSON_BUILD_OBJECT('id', t.id, 'name', t.name)
-          ) FILTER (WHERE t.id IS NOT NULL),
-          '[]'
-        ) AS tags
-      FROM courses c
-        JOIN enrollments e
-          ON e.course_id = c.id
-        AND e.user_id   = $1
-        AND e.status    = 'enrolled'
-        LEFT JOIN modules m
-          ON m.course_id = c.id
-        LEFT JOIN course_tags ct
-        ON ct.course_id = c.id
-        LEFT JOIN tags t
-          ON t.id = ct.tag_id
-        LEFT JOIN module_status ms
-          ON ms.module_id     = m.id
-        AND ms.enrollment_id = e.id
-      GROUP BY c.id, c.name, c.description;
+  c.id,
+  c.name,
+  c.description,
+  COUNT(m.id)                             AS total_modules,
+  COUNT(ms.id) FILTER (WHERE ms.status = 'completed')
+                                          AS completed_modules,
+  (
+    SELECT COALESCE(
+      JSON_AGG(JSON_BUILD_OBJECT('id', t2.id, 'name', t2.name)),
+      '[]'
+    )
+    FROM course_tags ct2
+    JOIN tags t2 ON t2.id = ct2.tag_id
+    WHERE ct2.course_id = c.id
+  ) AS tags
+FROM courses c
+  JOIN enrollments e  ON e.course_id = c.id  AND e.user_id = $1  AND e.status = 'enrolled'
+  LEFT JOIN modules m ON m.course_id = c.id
+  LEFT JOIN module_status ms
+    ON ms.module_id     = m.id
+   AND ms.enrollment_id = e.id
+GROUP BY c.id, c.name, c.description;
+
       `,
       [userId]
     );
@@ -983,33 +979,28 @@ router.get("/all-user-courses", async (req, res) => {
     const completedRes = await client.query(
       `
       SELECT
-        c.id,
-        c.name,
-        c.description,
-        COUNT(m.id)                             AS total_modules,
-        COUNT(ms.id) FILTER (WHERE ms.status = 'completed')
-                                                AS completed_modules,
-        COALESCE(
-          JSON_AGG(
-            JSON_BUILD_OBJECT('id', t.id, 'name', t.name)
-          ) FILTER (WHERE t.id IS NOT NULL),
-          '[]'
-        ) AS tagss
-      FROM courses c
-        JOIN enrollments e
-          ON e.course_id = c.id
-        AND e.user_id   = $1
-        AND e.status    = 'completed'
-        LEFT JOIN course_tags ct
-        ON ct.course_id = c.id
-        LEFT JOIN tags t
-          ON t.id = ct.tag_id
-        LEFT JOIN modules m
-          ON m.course_id = c.id
-        LEFT JOIN module_status ms
-          ON ms.module_id     = m.id
-        AND ms.enrollment_id = e.id
-      GROUP BY c.id, c.name, c.description;
+  c.id,
+  c.name,
+  c.description,
+  COUNT(m.id)                             AS total_modules,
+  COUNT(ms.id) FILTER (WHERE ms.status = 'completed')
+                                          AS completed_modules,
+  (
+    SELECT COALESCE(
+      JSON_AGG(JSON_BUILD_OBJECT('id', t2.id, 'name', t2.name)),
+      '[]'
+    )
+    FROM course_tags ct2
+    JOIN tags t2 ON t2.id = ct2.tag_id
+    WHERE ct2.course_id = c.id
+  ) AS tags
+FROM courses c
+  JOIN enrollments e  ON e.course_id = c.id  AND e.user_id = $1  AND e.status = 'completed'
+  LEFT JOIN modules m ON m.course_id = c.id
+  LEFT JOIN module_status ms
+    ON ms.module_id     = m.id
+   AND ms.enrollment_id = e.id
+GROUP BY c.id, c.name, c.description;
       `,
       [userId]
     );
