@@ -6,6 +6,8 @@ const courseRoutes = require("./routes/courses");
 const userRoutes = require("./routes/users");
 const reportsRoutes = require("./routes/reports");
 const onboardingRoutes = require("./routes/onboarding");
+const roadmapRoutes = require("./routes/roadmaps");
+const materialRoutes = require("./routes/materials");
 const pool = require("./database/db");
 const app = express();
 const PORT = process.env.PORT || 4000;
@@ -46,6 +48,8 @@ app.use("/api/courses", courseRoutes);
 app.use("/api/users", userRoutes);
 app.use("/api/reports", reportsRoutes);
 app.use("/api/onboarding", onboardingRoutes);
+app.use("/api/roadmaps", roadmapRoutes);
+app.use("/api/materials", materialRoutes);
 
 app.listen(PORT, () => {
   console.log(`Server running on http://localhost:${PORT}`);

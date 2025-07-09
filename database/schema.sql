@@ -265,10 +265,10 @@ CREATE TABLE roadmaps (
 CREATE TABLE roadmap_items (
   roadmap_id  INTEGER NOT NULL
     REFERENCES roadmaps(id) ON DELETE CASCADE,
-  material_id INTEGER NOT NULL
-    REFERENCES materials(id) ON DELETE CASCADE,
+  module_id INTEGER NOT NULL
+    REFERENCES modules(id) ON DELETE CASCADE,
   position    INTEGER NOT NULL,
-  PRIMARY KEY(roadmap_id, material_id)
+  PRIMARY KEY(roadmap_id, module_id)
 );
 
 ---
