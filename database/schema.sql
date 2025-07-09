@@ -296,5 +296,16 @@ CREATE TABLE roadmap_items (
     PRIMARY KEY(user_id, option_id)
   );
 
+--  USER SKILLS
+CREATE TABLE user_skills (
+  id          SERIAL PRIMARY KEY,
+  user_id     INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  skill_id    INTEGER NOT NULL REFERENCES skills(id) ON DELETE CASCADE,
+  level       VARCHAR(50) NOT NULL DEFAULT 'beginner', -- 'beginner', 'intermediate', 'advanced', 'expert'
+  acquired_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
+  UNIQUE(user_id, skill_id)
+);
+
 
 COMMIT;
