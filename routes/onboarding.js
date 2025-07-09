@@ -46,9 +46,13 @@ router.get("/questions", async (req, res) => {
     for (const question of questionsResult.rows) {
       const optionsResult = await pool.query(
         `
-        SELECT oqo.id, oqo.option_text, oqo.tag_id, t.name as tag_name
+        SELECT oqo.id, oqo.option_text, oqo.skill_id, s.name as skill_name, s.description as skill_description,
+               oqo.channel_id, ch.name as channel_name, ch.description as channel_description,
+               oqo.level_id, l.name as level_name, l.description as level_description, l.sort_order
         FROM onboarding_question_options oqo
-        LEFT JOIN tags t ON t.id = oqo.tag_id
+        LEFT JOIN skills s ON s.id = oqo.skill_id
+        LEFT JOIN channels ch ON ch.id = oqo.channel_id
+        LEFT JOIN levels l ON l.id = oqo.level_id
         WHERE oqo.question_id = $1
         ORDER BY oqo.id ASC
       `,
@@ -118,7 +122,7 @@ router.post("/questions/:id/options", async (req, res) => {
   }
 
   const { id } = req.params;
-  const { option_text, tag_id } = req.body;
+  const { option_text, skill_id, channel_id, level_id } = req.body;
 
   if (!option_text) {
     return res.status(400).json({ message: "option_text is required" });
@@ -143,32 +147,62 @@ router.post("/questions/:id/options", async (req, res) => {
       return res.status(404).json({ message: "Question not found" });
     }
 
-    let tagCheck = { rows: [] };
-    if (tag_id) {
-      tagCheck = await client.query(
-        "SELECT id, name FROM tags WHERE id = $1 AND organisation_id = $2",
-        [tag_id, organisationId]
+    let skillCheck = { rows: [] };
+    if (skill_id) {
+      skillCheck = await client.query(
+        "SELECT id, name, description FROM skills WHERE id = $1 AND organisation_id = $2",
+        [skill_id, organisationId]
       );
-      if (tagCheck.rows.length === 0) {
+      if (skillCheck.rows.length === 0) {
         await client.query("ROLLBACK");
-        return res.status(404).json({ message: "Tag not found" });
+        return res.status(404).json({ message: "Skill not found" });
+      }
+    }
+
+    let channelCheck = { rows: [] };
+    if (channel_id) {
+      channelCheck = await client.query(
+        "SELECT id, name, description FROM channels WHERE id = $1 AND organisation_id = $2",
+        [channel_id, organisationId]
+      );
+      if (channelCheck.rows.length === 0) {
+        await client.query("ROLLBACK");
+        return res.status(404).json({ message: "Channel not found" });
+      }
+    }
+
+    let levelCheck = { rows: [] };
+    if (level_id) {
+      levelCheck = await client.query(
+        "SELECT id, name, description, sort_order FROM levels WHERE id = $1 AND organisation_id = $2",
+        [level_id, organisationId]
+      );
+      if (levelCheck.rows.length === 0) {
+        await client.query("ROLLBACK");
+        return res.status(404).json({ message: "Level not found" });
       }
     }
 
     const result = await client.query(
       `
-      INSERT INTO onboarding_question_options (question_id, option_text, tag_id)
-      VALUES ($1, $2, $3)
-      RETURNING id, option_text, tag_id
+      INSERT INTO onboarding_question_options (question_id, option_text, skill_id, channel_id, level_id)
+      VALUES ($1, $2, $3, $4, $5)
+      RETURNING id, option_text, skill_id, channel_id, level_id
     `,
-      [id, option_text, tag_id || null]
+      [id, option_text, skill_id || null, channel_id || null, level_id || null]
     );
 
     await client.query("COMMIT");
 
     const option = {
       ...result.rows[0],
-      tag_name: tag_id ? tagCheck.rows[0].name : null,
+      skill_name: skill_id ? skillCheck.rows[0].name : null,
+      skill_description: skill_id ? skillCheck.rows[0].description : null,
+      channel_name: channel_id ? channelCheck.rows[0].name : null,
+      channel_description: channel_id ? channelCheck.rows[0].description : null,
+      level_name: level_id ? levelCheck.rows[0].name : null,
+      level_description: level_id ? levelCheck.rows[0].description : null,
+      level_sort_order: level_id ? levelCheck.rows[0].sort_order : null,
     };
 
     res.status(201).json({ option });
@@ -324,9 +358,98 @@ router.post("/responses", async (req, res) => {
       [user.userId]
     );
 
+    // Auto-generate first roadmap based on onboarding responses
+    try {
+      // Import helper functions (we'll need to add these as module-level functions)
+      const { getUserPreferences, getCoursesFromModules, ensureUserEnrolledInCourses } = require('./roadmaps-helpers');
+      
+      // Get user preferences (skills, channels, levels)
+      const preferences = await getUserPreferences(client, user.userId);
+      
+      if (preferences.skills.length > 0) {
+        // Generate roadmap with modules based on user preferences
+        const modulesResult = await client.query(
+          `SELECT DISTINCT
+             mod.id,
+             COUNT(DISTINCT ms.skill_id) as matching_skills,
+             COALESCE(
+               CASE 
+                 WHEN cc.channel_id = ANY($3) THEN 5
+                 WHEN cc.channel_id = ANY($4) THEN 3
+                 WHEN cc.channel_id IS NOT NULL THEN 1 
+                 ELSE 0 
+               END, 0) as channel_match,
+             COALESCE(
+               CASE 
+                 WHEN cc.level_id = ANY($5) THEN 5
+                 WHEN cc.level_id = ANY($6) THEN 3
+                 WHEN cc.level_id IS NOT NULL THEN 1 
+                 ELSE 0 
+               END, 0) as level_match,
+             RANDOM() as random_score
+           FROM modules mod
+           JOIN courses c ON c.id = mod.course_id
+           JOIN module_skills ms ON ms.module_id = mod.id
+           LEFT JOIN course_channels cc ON cc.course_id = c.id
+           LEFT JOIN enrollments e ON e.course_id = c.id AND e.user_id = $7
+           LEFT JOIN module_status mst ON mst.module_id = mod.id AND mst.enrollment_id = e.id
+           WHERE c.organisation_id = $1 
+             AND ms.skill_id = ANY($2)
+             AND (mst.status IS NULL OR mst.status IN ('not_started', 'in_progress'))
+           GROUP BY mod.id, cc.channel_id, cc.level_id
+           ORDER BY matching_skills DESC, channel_match DESC, level_match DESC, random_score
+           LIMIT 10`,
+          [
+            user.organisation.id,
+            preferences.skills,
+            preferences.memberChannels,
+            preferences.onboardingChannels,
+            preferences.memberLevels,
+            preferences.onboardingLevels,
+            user.userId
+          ]
+        );
+
+        if (modulesResult.rows.length > 0) {
+          // Create the roadmap
+          const roadmapResult = await client.query(
+            "INSERT INTO roadmaps (user_id, name) VALUES ($1, $2) RETURNING id",
+            [user.userId, "My Learning Path"]
+          );
+
+          const roadmapId = roadmapResult.rows[0].id;
+          const moduleIds = modulesResult.rows.map(row => row.id);
+
+          // Get courses for auto-enrollment
+          const courseIds = await getCoursesFromModules(client, moduleIds);
+          
+          // Auto-enroll user in courses
+          if (courseIds.length > 0) {
+            await ensureUserEnrolledInCourses(client, user.userId, courseIds);
+          }
+
+          // Add modules to roadmap
+          for (let i = 0; i < moduleIds.length; i++) {
+            await client.query(
+              "INSERT INTO roadmap_items (roadmap_id, module_id, position) VALUES ($1, $2, $3)",
+              [roadmapId, moduleIds[i], i + 1]
+            );
+          }
+
+          console.log(`Auto-generated roadmap "${roadmapResult.rows[0].name}" with ${moduleIds.length} modules for user ${user.userId}`);
+        }
+      }
+    } catch (roadmapError) {
+      // Don't fail the onboarding if roadmap generation fails
+      console.error("Failed to auto-generate roadmap:", roadmapError);
+    }
+
     await client.query("COMMIT");
 
-    res.json({ message: "Responses submitted successfully" });
+    res.json({ 
+      message: "Responses submitted successfully",
+      roadmapGenerated: true
+    });
   } catch (err) {
     await client.query("ROLLBACK");
     console.error(err);
@@ -352,14 +475,24 @@ router.get("/responses", async (req, res) => {
       SELECT 
         or.option_id,
         oqo.option_text,
-        oqo.tag_id,
-        t.name as tag_name,
+        oqo.skill_id,
+        s.name as skill_name,
+        s.description as skill_description,
+        oqo.channel_id,
+        ch.name as channel_name,
+        ch.description as channel_description,
+        oqo.level_id,
+        l.name as level_name,
+        l.description as level_description,
+        l.sort_order as level_sort_order,
         oq.question_text,
         oq.id as question_id
       FROM onboarding_responses or
       JOIN onboarding_question_options oqo ON oqo.id = or.option_id
       JOIN onboarding_questions oq ON oq.id = oqo.question_id
-      LEFT JOIN tags t ON t.id = oqo.tag_id
+      LEFT JOIN skills s ON s.id = oqo.skill_id
+      LEFT JOIN channels ch ON ch.id = oqo.channel_id
+      LEFT JOIN levels l ON l.id = oqo.level_id
       WHERE or.user_id = $1
       ORDER BY oq.position ASC
     `,
@@ -369,8 +502,16 @@ router.get("/responses", async (req, res) => {
     const responses = result.rows.map((row) => ({
       option_id: row.option_id,
       option_text: row.option_text,
-      tag_id: row.tag_id,
-      tag_name: row.tag_name,
+      skill_id: row.skill_id,
+      skill_name: row.skill_name,
+      skill_description: row.skill_description,
+      channel_id: row.channel_id,
+      channel_name: row.channel_name,
+      channel_description: row.channel_description,
+      level_id: row.level_id,
+      level_name: row.level_name,
+      level_description: row.level_description,
+      level_sort_order: row.level_sort_order,
       question_text: row.question_text,
       question_id: row.question_id,
     }));

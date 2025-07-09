@@ -111,8 +111,12 @@ CREATE TABLE materials (
 );
 
 CREATE TABLE skills (
-  id   SERIAL PRIMARY KEY,
-  name VARCHAR(100) NOT NULL UNIQUE
+  id              SERIAL PRIMARY KEY,
+  name            VARCHAR(100) NOT NULL,
+  description     TEXT,
+  organisation_id INTEGER NOT NULL REFERENCES organisations(id) ON DELETE CASCADE,
+  created_at      TIMESTAMPTZ NOT NULL DEFAULT now(),
+  UNIQUE(name, organisation_id)
 );
 
 CREATE TABLE material_skills (
@@ -175,52 +179,41 @@ CREATE TABLE quiz_answers (
 );
 
 
--- 8. TAGS
-CREATE TABLE tags (
-  id   SERIAL PRIMARY KEY,
-  name VARCHAR(50) NOT NULL,
+-- 8. CHANNELS, LEVELS & SKILLS
+-- Channels (topics) for courses
+CREATE TABLE channels (
+  id              SERIAL PRIMARY KEY,
+  name            VARCHAR(100) NOT NULL,
+  description     TEXT,
   organisation_id INTEGER NOT NULL REFERENCES organisations(id) ON DELETE CASCADE,
-  UNIQUE (name, organisation_id)
+  created_at      TIMESTAMPTZ NOT NULL DEFAULT now(),
+  UNIQUE(name, organisation_id)
 );
 
-CREATE TABLE course_tags (
-  course_id INTEGER NOT NULL
-    REFERENCES courses(id) ON DELETE CASCADE,
-  tag_id    INTEGER NOT NULL
-    REFERENCES tags(id) ON DELETE CASCADE,
-  PRIMARY KEY(course_id, tag_id)
+-- Levels (difficulty) for courses
+CREATE TABLE levels (
+  id              SERIAL PRIMARY KEY,
+  name            VARCHAR(50) NOT NULL,
+  description     TEXT,
+  sort_order      INTEGER NOT NULL DEFAULT 0,
+  organisation_id INTEGER NOT NULL REFERENCES organisations(id) ON DELETE CASCADE,
+  created_at      TIMESTAMPTZ NOT NULL DEFAULT now(),
+  UNIQUE(name, organisation_id)
 );
 
-CREATE TABLE module_tags (
-  module_id INTEGER NOT NULL
-    REFERENCES modules(id) ON DELETE CASCADE,
-  tag_id    INTEGER NOT NULL
-    REFERENCES tags(id) ON DELETE CASCADE,
-  PRIMARY KEY(module_id, tag_id)
+-- Course-channel-level associations
+CREATE TABLE course_channels (
+  course_id  INTEGER NOT NULL REFERENCES courses(id) ON DELETE CASCADE,
+  channel_id INTEGER NOT NULL REFERENCES channels(id) ON DELETE CASCADE,
+  level_id   INTEGER NOT NULL REFERENCES levels(id) ON DELETE CASCADE,
+  PRIMARY KEY(course_id, channel_id, level_id)
 );
 
-CREATE TABLE revision_tags (
-  revision_id INTEGER NOT NULL
-    REFERENCES revisions(id) ON DELETE CASCADE,
-  tag_id      INTEGER NOT NULL
-    REFERENCES tags(id) ON DELETE CASCADE,
-  PRIMARY KEY(revision_id, tag_id)
-);
-
-CREATE TABLE quiz_tags (
-  quiz_id INTEGER NOT NULL
-    REFERENCES quizzes(id) ON DELETE CASCADE,
-  tag_id  INTEGER NOT NULL
-    REFERENCES tags(id) ON DELETE CASCADE,
-  PRIMARY KEY(quiz_id, tag_id)
-);
-
-CREATE TABLE question_tags (
-  question_id INTEGER NOT NULL
-    REFERENCES questions(id) ON DELETE CASCADE,
-  tag_id      INTEGER NOT NULL
-    REFERENCES tags(id) ON DELETE CASCADE,
-  PRIMARY KEY(question_id, tag_id)
+-- Module-skills associations
+CREATE TABLE module_skills (
+  module_id INTEGER NOT NULL REFERENCES modules(id) ON DELETE CASCADE,
+  skill_id  INTEGER NOT NULL REFERENCES skills(id) ON DELETE CASCADE,
+  PRIMARY KEY(module_id, skill_id)
 );
 
 
@@ -286,7 +279,9 @@ CREATE TABLE roadmap_items (
     id           SERIAL PRIMARY KEY,
     question_id  INTEGER NOT NULL REFERENCES onboarding_questions(id) ON DELETE CASCADE,
     option_text  TEXT NOT NULL,
-    tag_id       INTEGER REFERENCES tags(id) ON DELETE CASCADE
+    skill_id     INTEGER REFERENCES skills(id) ON DELETE CASCADE,
+    channel_id INTEGER REFERENCES channels(id) ON DELETE CASCADE,
+    level_id INTEGER REFERENCES levels(id) ON DELETE CASCADE,
   );
 
   -- Table to store user responses
@@ -305,6 +300,26 @@ CREATE TABLE user_skills (
   acquired_at TIMESTAMPTZ NOT NULL DEFAULT now(),
   updated_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
   UNIQUE(user_id, skill_id)
+);
+
+-- Table for user channel preferences
+CREATE TABLE user_channels (
+  id              SERIAL PRIMARY KEY,
+  user_id         INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  channel_id      INTEGER NOT NULL REFERENCES channels(id) ON DELETE CASCADE,
+  preference_rank INTEGER NOT NULL DEFAULT 1,
+  added_at        TIMESTAMPTZ NOT NULL DEFAULT now(),
+  UNIQUE(user_id, channel_id)
+);
+
+-- Table for user level preferences  
+CREATE TABLE user_levels (
+  id              SERIAL PRIMARY KEY,
+  user_id         INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  level_id        INTEGER NOT NULL REFERENCES levels(id) ON DELETE CASCADE,
+  preference_rank INTEGER NOT NULL DEFAULT 1,
+  added_at        TIMESTAMPTZ NOT NULL DEFAULT now(),
+  UNIQUE(user_id, level_id)
 );
 
 

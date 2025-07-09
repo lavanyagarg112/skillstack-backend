@@ -408,5 +408,315 @@ router.delete("/skills", async (req, res) => {
   }
 });
 
+// =============================================================================
+// USER PREFERENCES ENDPOINTS (Channels and Levels)
+// =============================================================================
+
+// GET /api/users/preferences - Get user's channel and level preferences along with available options
+router.get("/preferences", async (req, res) => {
+  const { auth } = req.cookies;
+  if (!auth) return res.status(401).json({ message: "Not authenticated" });
+
+  let session;
+  try {
+    session = JSON.parse(auth);
+  } catch {
+    return res.status(400).json({ message: "Invalid session data" });
+  }
+
+  const userId = session.userId;
+  const organisationId = session.organisation?.id;
+
+  const client = await pool.connect();
+  try {
+    await client.query("BEGIN");
+
+    // Get user's channel preferences
+    const userChannelsResult = await client.query(
+      `SELECT uc.id, uc.channel_id, c.name as channel_name, c.description as channel_description, uc.preference_rank
+       FROM user_channels uc
+       JOIN channels c ON c.id = uc.channel_id
+       WHERE uc.user_id = $1
+       ORDER BY uc.preference_rank`,
+      [userId]
+    );
+
+    // Get user's level preferences
+    const userLevelsResult = await client.query(
+      `SELECT ul.id, ul.level_id, l.name as level_name, l.description as level_description, l.sort_order, ul.preference_rank
+       FROM user_levels ul
+       JOIN levels l ON l.id = ul.level_id
+       WHERE ul.user_id = $1
+       ORDER BY ul.preference_rank`,
+      [userId]
+    );
+
+    // Get all available channels for the organization
+    const allChannelsResult = await client.query(
+      `SELECT id, name, description
+       FROM channels
+       WHERE organisation_id = $1
+       ORDER BY name`,
+      [organisationId]
+    );
+
+    // Get all available levels for the organization
+    const allLevelsResult = await client.query(
+      `SELECT id, name, description, sort_order
+       FROM levels
+       WHERE organisation_id = $1
+       ORDER BY sort_order, name`,
+      [organisationId]
+    );
+
+    await client.query("COMMIT");
+
+    return res.json({
+      userChannels: userChannelsResult.rows,
+      userLevels: userLevelsResult.rows,
+      availableChannels: allChannelsResult.rows,
+      availableLevels: allLevelsResult.rows
+    });
+  } catch (error) {
+    await client.query("ROLLBACK");
+    console.error("Error fetching user preferences:", error);
+    return res.status(500).json({ message: "Server error" });
+  } finally {
+    client.release();
+  }
+});
+
+// POST /api/users/preferences/channels - Add channel preference
+router.post("/preferences/channels", async (req, res) => {
+  const { auth } = req.cookies;
+  if (!auth) return res.status(401).json({ message: "Not authenticated" });
+
+  let session;
+  try {
+    session = JSON.parse(auth);
+  } catch {
+    return res.status(400).json({ message: "Invalid session data" });
+  }
+
+  const userId = session.userId;
+  const organisationId = session.organisation?.id;
+  const { channel_id } = req.body;
+
+  if (!channel_id) {
+    return res.status(400).json({ message: "Channel ID is required" });
+  }
+
+  const client = await pool.connect();
+  try {
+    await client.query("BEGIN");
+
+    // Verify channel belongs to user's organization
+    const channelCheck = await client.query(
+      "SELECT id FROM channels WHERE id = $1 AND organisation_id = $2",
+      [channel_id, organisationId]
+    );
+
+    if (channelCheck.rows.length === 0) {
+      await client.query("ROLLBACK");
+      return res.status(400).json({ message: "Invalid channel" });
+    }
+
+    // Check if preference already exists
+    const existingResult = await client.query(
+      "SELECT id FROM user_channels WHERE user_id = $1 AND channel_id = $2",
+      [userId, channel_id]
+    );
+
+    if (existingResult.rows.length > 0) {
+      await client.query("ROLLBACK");
+      return res.status(400).json({ message: "Channel preference already exists" });
+    }
+
+    // Get next preference rank
+    const rankResult = await client.query(
+      "SELECT COALESCE(MAX(preference_rank), 0) + 1 as next_rank FROM user_channels WHERE user_id = $1",
+      [userId]
+    );
+
+    const nextRank = rankResult.rows[0].next_rank;
+
+    // Add channel preference
+    await client.query(
+      "INSERT INTO user_channels (user_id, channel_id, preference_rank) VALUES ($1, $2, $3)",
+      [userId, channel_id, nextRank]
+    );
+
+    await client.query("COMMIT");
+    return res.json({ message: "Channel preference added successfully" });
+  } catch (error) {
+    await client.query("ROLLBACK");
+    console.error("Error adding channel preference:", error);
+    return res.status(500).json({ message: "Server error" });
+  } finally {
+    client.release();
+  }
+});
+
+// POST /api/users/preferences/levels - Add level preference
+router.post("/preferences/levels", async (req, res) => {
+  const { auth } = req.cookies;
+  if (!auth) return res.status(401).json({ message: "Not authenticated" });
+
+  let session;
+  try {
+    session = JSON.parse(auth);
+  } catch {
+    return res.status(400).json({ message: "Invalid session data" });
+  }
+
+  const userId = session.userId;
+  const organisationId = session.organisation?.id;
+  const { level_id } = req.body;
+
+  if (!level_id) {
+    return res.status(400).json({ message: "Level ID is required" });
+  }
+
+  const client = await pool.connect();
+  try {
+    await client.query("BEGIN");
+
+    // Verify level belongs to user's organization
+    const levelCheck = await client.query(
+      "SELECT id FROM levels WHERE id = $1 AND organisation_id = $2",
+      [level_id, organisationId]
+    );
+
+    if (levelCheck.rows.length === 0) {
+      await client.query("ROLLBACK");
+      return res.status(400).json({ message: "Invalid level" });
+    }
+
+    // Check if preference already exists
+    const existingResult = await client.query(
+      "SELECT id FROM user_levels WHERE user_id = $1 AND level_id = $2",
+      [userId, level_id]
+    );
+
+    if (existingResult.rows.length > 0) {
+      await client.query("ROLLBACK");
+      return res.status(400).json({ message: "Level preference already exists" });
+    }
+
+    // Get next preference rank
+    const rankResult = await client.query(
+      "SELECT COALESCE(MAX(preference_rank), 0) + 1 as next_rank FROM user_levels WHERE user_id = $1",
+      [userId]
+    );
+
+    const nextRank = rankResult.rows[0].next_rank;
+
+    // Add level preference
+    await client.query(
+      "INSERT INTO user_levels (user_id, level_id, preference_rank) VALUES ($1, $2, $3)",
+      [userId, level_id, nextRank]
+    );
+
+    await client.query("COMMIT");
+    return res.json({ message: "Level preference added successfully" });
+  } catch (error) {
+    await client.query("ROLLBACK");
+    console.error("Error adding level preference:", error);
+    return res.status(500).json({ message: "Server error" });
+  } finally {
+    client.release();
+  }
+});
+
+// DELETE /api/users/preferences/channels - Remove channel preference
+router.delete("/preferences/channels", async (req, res) => {
+  const { auth } = req.cookies;
+  if (!auth) return res.status(401).json({ message: "Not authenticated" });
+
+  let session;
+  try {
+    session = JSON.parse(auth);
+  } catch {
+    return res.status(400).json({ message: "Invalid session data" });
+  }
+
+  const userId = session.userId;
+  const { channel_id } = req.body;
+
+  if (!channel_id) {
+    return res.status(400).json({ message: "Channel ID is required" });
+  }
+
+  const client = await pool.connect();
+  try {
+    await client.query("BEGIN");
+
+    // Remove channel preference
+    const result = await client.query(
+      "DELETE FROM user_channels WHERE user_id = $1 AND channel_id = $2",
+      [userId, channel_id]
+    );
+
+    if (result.rowCount === 0) {
+      await client.query("ROLLBACK");
+      return res.status(404).json({ message: "Channel preference not found" });
+    }
+
+    await client.query("COMMIT");
+    return res.json({ message: "Channel preference removed successfully" });
+  } catch (error) {
+    await client.query("ROLLBACK");
+    console.error("Error removing channel preference:", error);
+    return res.status(500).json({ message: "Server error" });
+  } finally {
+    client.release();
+  }
+});
+
+// DELETE /api/users/preferences/levels - Remove level preference
+router.delete("/preferences/levels", async (req, res) => {
+  const { auth } = req.cookies;
+  if (!auth) return res.status(401).json({ message: "Not authenticated" });
+
+  let session;
+  try {
+    session = JSON.parse(auth);
+  } catch {
+    return res.status(400).json({ message: "Invalid session data" });
+  }
+
+  const userId = session.userId;
+  const { level_id } = req.body;
+
+  if (!level_id) {
+    return res.status(400).json({ message: "Level ID is required" });
+  }
+
+  const client = await pool.connect();
+  try {
+    await client.query("BEGIN");
+
+    // Remove level preference
+    const result = await client.query(
+      "DELETE FROM user_levels WHERE user_id = $1 AND level_id = $2",
+      [userId, level_id]
+    );
+
+    if (result.rowCount === 0) {
+      await client.query("ROLLBACK");
+      return res.status(404).json({ message: "Level preference not found" });
+    }
+
+    await client.query("COMMIT");
+    return res.json({ message: "Level preference removed successfully" });
+  } catch (error) {
+    await client.query("ROLLBACK");
+    console.error("Error removing level preference:", error);
+    return res.status(500).json({ message: "Server error" });
+  } finally {
+    client.release();
+  }
+});
+
 
 module.exports = router;
