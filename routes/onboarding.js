@@ -26,16 +26,21 @@ router.get("/questions", async (req, res) => {
     return res.status(401).json({ message: "Not logged in" });
   }
 
-  // if (!isEmployee(user)) {
-  //   return res.status(403).json({ message: "Employee access required" });
-  // }
+  const organisationId = user.organisation?.id;
+  if (!organisationId) {
+    return res.status(400).json({ message: "Organization required" });
+  }
 
   try {
-    const questionsResult = await pool.query(`
+    const questionsResult = await pool.query(
+      `
       SELECT id, question_text, position 
       FROM onboarding_questions 
+      WHERE organisation_id = $1
       ORDER BY position ASC
-    `);
+    `,
+      [organisationId]
+    );
 
     const questions = [];
     for (const question of questionsResult.rows) {
@@ -80,14 +85,19 @@ router.post("/questions", async (req, res) => {
     return res.status(400).json({ message: "question_text is required" });
   }
 
+  const organisationId = user.organisation?.id;
+  if (!organisationId) {
+    return res.status(400).json({ message: "Organization required" });
+  }
+
   try {
     const result = await pool.query(
       `
-      INSERT INTO onboarding_questions (question_text, position)
-      VALUES ($1, $2)
+      INSERT INTO onboarding_questions (question_text, position, organisation_id)
+      VALUES ($1, $2, $3)
       RETURNING id, question_text, position
     `,
-      [question_text, position]
+      [question_text, position, organisationId]
     );
 
     res.status(201).json({ question: result.rows[0] });
@@ -118,9 +128,15 @@ router.post("/questions/:id/options", async (req, res) => {
   try {
     await client.query("BEGIN");
 
+    const organisationId = user.organisation?.id;
+    if (!organisationId) {
+      await client.query("ROLLBACK");
+      return res.status(400).json({ message: "Organization required" });
+    }
+
     const questionCheck = await client.query(
-      "SELECT id FROM onboarding_questions WHERE id = $1",
-      [id]
+      "SELECT id FROM onboarding_questions WHERE id = $1 AND organisation_id = $2",
+      [id, organisationId]
     );
     if (questionCheck.rows.length === 0) {
       await client.query("ROLLBACK");
@@ -129,9 +145,10 @@ router.post("/questions/:id/options", async (req, res) => {
 
     let tagCheck = { rows: [] };
     if (tag_id) {
-      tagCheck = await client.query("SELECT id, name FROM tags WHERE id = $1", [
-        tag_id,
-      ]);
+      tagCheck = await client.query(
+        "SELECT id, name FROM tags WHERE id = $1 AND organisation_id = $2",
+        [tag_id, organisationId]
+      );
       if (tagCheck.rows.length === 0) {
         await client.query("ROLLBACK");
         return res.status(404).json({ message: "Tag not found" });
@@ -176,10 +193,29 @@ router.delete("/questions/:id", async (req, res) => {
 
   const { id } = req.params;
 
+  const organisationId = user.organisation?.id;
+  if (!organisationId) {
+    return res.status(400).json({ message: "Organization required" });
+  }
+
   try {
-    const result = await pool.query(
-      "DELETE FROM onboarding_questions WHERE id = $1 RETURNING id",
+    // Check if question has any options before deletion
+    const optionCheck = await pool.query(
+      "SELECT COUNT(*) as option_count FROM onboarding_question_options WHERE question_id = $1",
       [id]
+    );
+
+    const hasOptions = parseInt(optionCheck.rows[0].option_count) > 0;
+    if (hasOptions) {
+      return res.status(400).json({
+        message:
+          "Cannot delete question that has options. Please delete all options first.",
+      });
+    }
+
+    const result = await pool.query(
+      "DELETE FROM onboarding_questions WHERE id = $1 AND organisation_id = $2 RETURNING id",
+      [id, organisationId]
     );
 
     if (result.rows.length === 0) {
@@ -187,6 +223,67 @@ router.delete("/questions/:id", async (req, res) => {
     }
 
     res.json({ message: "Question deleted successfully" });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ message: "Server error" });
+  }
+});
+
+router.delete("/options/:optionId", async (req, res) => {
+  const user = getAuthUser(req);
+  if (!user || !user.isLoggedIn) {
+    return res.status(401).json({ message: "Not logged in" });
+  }
+
+  if (!isAdmin(user)) {
+    return res.status(403).json({ message: "Admin access required" });
+  }
+
+  const { optionId } = req.params;
+  const organisationId = user.organisation?.id;
+  if (!organisationId) {
+    return res.status(400).json({ message: "Organization required" });
+  }
+
+  try {
+    const optionCheck = await pool.query(
+      `
+      SELECT oqo.question_id, oq.organisation_id 
+      FROM onboarding_question_options oqo
+      JOIN onboarding_questions oq ON oq.id = oqo.question_id
+      WHERE oqo.id = $1
+    `,
+      [optionId]
+    );
+
+    if (optionCheck.rows.length === 0) {
+      return res.status(404).json({ message: "Option not found" });
+    }
+
+    const option = optionCheck.rows[0];
+    if (option.organisation_id !== organisationId) {
+      return res.status(403).json({ message: "Access denied" });
+    }
+
+    const optionCountCheck = await pool.query(
+      "SELECT COUNT(*) as option_count FROM onboarding_question_options WHERE question_id = $1",
+      [option.question_id]
+    );
+
+    const optionCount = parseInt(optionCountCheck.rows[0].option_count);
+    if (optionCount <= 1) {
+      return res.status(400).json({
+        message:
+          "Cannot delete the last option. Questions must have at least one option.",
+      });
+    }
+
+    const result = await pool.query(
+      "DELETE FROM onboarding_question_options WHERE id = $1 RETURNING id",
+      [optionId]
+    );
+
+    res.json({ message: "Option deleted successfully" });
   } catch (err) {
     console.error(err);
     res.status(500).json({ message: "Server error" });

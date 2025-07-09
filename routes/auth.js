@@ -129,15 +129,24 @@ router.post("/complete-onboarding", async (req, res) => {
     const organisation = mem.rows[0] || null;
 
     if (organisation && organisation.role === "employee") {
-      const responseCheck = await pool.query(
-        `SELECT COUNT(*) as response_count FROM onboarding_responses WHERE user_id = $1`,
-        [user.userId]
+      const questionCheck = await pool.query(
+        `SELECT COUNT(*) as question_count FROM onboarding_questions WHERE organisation_id = $1`,
+        [organisation.id]
       );
 
-      if (parseInt(responseCheck.rows[0].response_count) === 0) {
-        return res.status(400).json({
-          message: "Onboarding questionnaire must be completed first",
-        });
+      const hasQuestions = parseInt(questionCheck.rows[0].question_count) > 0;
+
+      if (hasQuestions) {
+        const responseCheck = await pool.query(
+          `SELECT COUNT(*) as response_count FROM onboarding_responses WHERE user_id = $1`,
+          [user.userId]
+        );
+
+        if (parseInt(responseCheck.rows[0].response_count) === 0) {
+          return res.status(400).json({
+            message: "Onboarding questionnaire must be completed first",
+          });
+        }
       }
     }
 

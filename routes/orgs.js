@@ -14,7 +14,6 @@ function setAuthCookie(res, payload) {
   });
 }
 
-// Create a new organization AND make the current user its admin
 router.post("/", async (req, res) => {
   const { auth } = req.cookies;
   if (!auth) return res.status(401).json({ message: "Not authenticated" });
@@ -115,6 +114,16 @@ router.post("/addemployee", async (req, res) => {
     );
 
     await client.query("COMMIT");
+
+    setAuthCookie(res, {
+      ...session,
+      organisation: {
+        id: org.id,
+        organisationname: org.organisation_name,
+        role: "employee",
+      },
+    });
+
     return res.status(201).json({ organisation: { ...org, role: "employee" } });
   } catch (err) {
     await client.query("ROLLBACK");

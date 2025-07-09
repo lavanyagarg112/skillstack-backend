@@ -1810,9 +1810,13 @@ router.post("/add-tags", async (req, res) => {
   }
 
   const userId = session.userId;
+  const organisationId = session.organisation?.id;
   const isAdmin = session.organisation?.role === "admin";
   if (!isAdmin) {
     return res.status(403).json({ message: "Forbidden" });
+  }
+  if (!organisationId) {
+    return res.status(400).json({ message: "Organization required" });
   }
   const { tags } = req.body;
   if (!Array.isArray(tags)) {
@@ -1827,10 +1831,10 @@ router.post("/add-tags", async (req, res) => {
         continue; // skip if tag has no name
       }
       await client.query(
-        `INSERT INTO tags (name)
-         VALUES ($1)
-         ON CONFLICT (name) DO NOTHING`,
-        [tag.name]
+        `INSERT INTO tags (name, organisation_id)
+         VALUES ($1, $2)
+         ON CONFLICT (name, organisation_id) DO NOTHING`,
+        [tag.name, organisationId]
       );
     }
     await client.query("COMMIT");
@@ -1845,10 +1849,26 @@ router.post("/add-tags", async (req, res) => {
 });
 
 router.get("/tags", async (req, res) => {
+  const { auth } = req.cookies;
+  if (!auth) return res.status(401).json({ message: "Not authenticated" });
+
+  let session;
+  try {
+    session = JSON.parse(auth);
+  } catch {
+    return res.status(400).json({ message: "Invalid session data" });
+  }
+
+  const organisationId = session.organisation?.id;
+  if (!organisationId) {
+    return res.status(400).json({ message: "Organization required" });
+  }
+
   const client = await pool.connect();
   try {
     const { rows } = await client.query(
-      `SELECT id, name FROM tags ORDER BY name`
+      `SELECT id, name FROM tags WHERE organisation_id = $1 ORDER BY name`,
+      [organisationId]
     );
     res.json(rows);
   } catch (err) {
@@ -1870,9 +1890,13 @@ router.delete("/delete-tag", async (req, res) => {
     return res.status(400).json({ message: "Invalid session data" });
   }
 
+  const organisationId = session.organisation?.id;
   const isAdmin = session.organisation?.role === "admin";
   if (!isAdmin) {
     return res.status(403).json({ message: "Forbidden" });
+  }
+  if (!organisationId) {
+    return res.status(400).json({ message: "Organization required" });
   }
   const { tagId } = req.body;
   if (!tagId) {
@@ -1882,7 +1906,7 @@ router.delete("/delete-tag", async (req, res) => {
   const client = await pool.connect();
   try {
     await client.query("BEGIN");
-    await client.query(`DELETE FROM tags WHERE id = $1`, [tagId]);
+    await client.query(`DELETE FROM tags WHERE id = $1 AND organisation_id = $2`, [tagId, organisationId]);
     await client.query("COMMIT");
     return res.status(200).json({ success: true });
   } catch (err) {
