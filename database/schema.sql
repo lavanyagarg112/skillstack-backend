@@ -178,7 +178,9 @@ CREATE TABLE quiz_answers (
 -- 8. TAGS
 CREATE TABLE tags (
   id   SERIAL PRIMARY KEY,
-  name VARCHAR(50) NOT NULL UNIQUE
+  name VARCHAR(50) NOT NULL,
+  organisation_id INTEGER NOT NULL REFERENCES organisations(id) ON DELETE CASCADE,
+  UNIQUE (name, organisation_id)
 );
 
 CREATE TABLE course_tags (
@@ -275,7 +277,8 @@ CREATE TABLE roadmap_items (
   CREATE TABLE onboarding_questions (
     id            SERIAL PRIMARY KEY,
     question_text TEXT NOT NULL,
-    position      INTEGER NOT NULL DEFAULT 0
+    position      INTEGER NOT NULL DEFAULT 0,
+    organisation_id INTEGER NOT NULL REFERENCES organisations(id) ON DELETE CASCADE
   );
 
   -- Table to store answer options for each question
