@@ -1,4 +1,3 @@
-// routes/orgs.js
 const express = require("express");
 const pool = require("../database/db");
 const router = express.Router();
@@ -35,7 +34,6 @@ router.post("/", async (req, res) => {
   try {
     await client.query("BEGIN");
 
-    // 1) Insert into organisations
     const orgRes = await client.query(
       `INSERT INTO organisations (organisation_name, admin_user_id)
        VALUES ($1, $2)
@@ -44,7 +42,6 @@ router.post("/", async (req, res) => {
     );
     const org = orgRes.rows[0];
 
-    // 2) Link user → new org as admin
     await client.query(
       `INSERT INTO organisation_users (user_id, organisation_id, role)
        VALUES ($1, $2, 'admin')`,
@@ -56,7 +53,6 @@ router.post("/", async (req, res) => {
   } catch (err) {
     await client.query("ROLLBACK");
     console.error(err);
-    // unique violation on org name
     if (err.code === "23505") {
       if (
         err.constraint === "organisations_organisation_name_admin_user_id_key"
@@ -95,7 +91,6 @@ router.post("/addemployee", async (req, res) => {
   try {
     await client.query("BEGIN");
 
-    // 1) See if org exists
     const orgRes = await client.query(
       `SELECT id, organisation_name FROM organisations WHERE current_invitation_id = $1`,
       [inviteCode]
@@ -106,7 +101,6 @@ router.post("/addemployee", async (req, res) => {
     const org = orgRes.rows[0];
     const organisationId = org.id;
 
-    // 2) Link user → new org as employee
     await client.query(
       `INSERT INTO organisation_users (user_id, organisation_id, role)
        VALUES ($1, $2, 'employee')`,
@@ -134,7 +128,6 @@ router.post("/addemployee", async (req, res) => {
   }
 });
 
-// Get the single organization (and role) for the current user
 router.get("/my", async (req, res) => {
   const { auth } = req.cookies;
   if (!auth) return res.status(401).json({ message: "Not authenticated" });
@@ -164,7 +157,6 @@ router.get("/my", async (req, res) => {
       return res.json({ organisation: null });
     }
 
-    // exactly one row guaranteed by PK on user_id
     return res.json({ organisation: result.rows[0] });
   } catch (err) {
     console.error(err);
@@ -199,7 +191,6 @@ router.get("/settings", async (req, res) => {
       return res.status(400).json({ message: "Organization not found" });
     }
 
-    // exactly one row guaranteed by PK on user_id
     return res.json({ organisation: result.rows[0] });
   } catch (err) {
     console.error(err);

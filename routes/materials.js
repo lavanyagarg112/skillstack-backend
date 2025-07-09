@@ -3,7 +3,6 @@ const pool = require("../database/db");
 const router = express.Router();
 const { getUserPreferences } = require("./roadmaps-helpers");
 
-// Helper function to parse auth cookie
 function getAuthUser(req) {
   const { auth } = req.cookies;
   if (!auth) return null;
@@ -14,7 +13,6 @@ function getAuthUser(req) {
   }
 }
 
-// GET /api/materials - Get all modules for the user's organization
 router.get("/", async (req, res) => {
   const user = getAuthUser(req);
   if (!user || !user.isLoggedIn) {
@@ -26,7 +24,7 @@ router.get("/", async (req, res) => {
     return res.status(400).json({ message: "Organization required" });
   }
 
-  const { skill_ids } = req.query; // Comma-separated skill IDs
+  const { skill_ids } = req.query;
 
   try {
     let query = `
@@ -61,7 +59,6 @@ router.get("/", async (req, res) => {
 
     const params = [organisationId];
 
-    // If skill_ids are provided, filter by those skills
     if (skill_ids) {
       const skillIdArray = skill_ids
         .split(",")
@@ -85,7 +82,6 @@ router.get("/", async (req, res) => {
   }
 });
 
-// GET /api/materials/by-user-skills - Get modules recommended based on user's skills and preferences
 router.get("/by-user-skills", async (req, res) => {
   const user = getAuthUser(req);
   if (!user || !user.isLoggedIn) {
@@ -99,7 +95,6 @@ router.get("/by-user-skills", async (req, res) => {
 
   const client = await pool.connect();
   try {
-    // Get user's skills from onboarding responses
     const userSkillsResult = await client.query(
       `SELECT DISTINCT oqo.skill_id
        FROM onboarding_responses or_table
@@ -114,10 +109,8 @@ router.get("/by-user-skills", async (req, res) => {
       return res.json({ materials: [] });
     }
 
-    // Get user's channel and level preferences (combines member settings and onboarding)
     const userPreferences = await getUserPreferences(client, user.userId);
 
-    // Get modules that match user's skills with enhanced scoring based on member preferences
     const result = await client.query(
       `SELECT DISTINCT
          mod.id,
@@ -195,7 +188,6 @@ router.get("/by-user-skills", async (req, res) => {
   }
 });
 
-// Backward compatibility: redirect old by-user-tags to new by-user-skills
 router.get("/by-user-tags", async (req, res) => {
   const user = getAuthUser(req);
   if (!user || !user.isLoggedIn) {
@@ -209,7 +201,6 @@ router.get("/by-user-tags", async (req, res) => {
 
   const client = await pool.connect();
   try {
-    // Get user's skills from onboarding responses
     const userSkillsResult = await client.query(
       `SELECT DISTINCT oqo.skill_id
        FROM onboarding_responses or_table
@@ -224,10 +215,8 @@ router.get("/by-user-tags", async (req, res) => {
       return res.json({ materials: [] });
     }
 
-    // Get user's channel and level preferences (combines member settings and onboarding)
     const userPreferences = await getUserPreferences(client, user.userId);
 
-    // Get modules that match user's skills with enhanced scoring based on member preferences
     const result = await client.query(
       `SELECT DISTINCT
          mod.id,
@@ -291,7 +280,7 @@ router.get("/by-user-tags", async (req, res) => {
 
     res.json({
       materials: result.rows,
-      userTags: userSkillIds, // Keep old property name for backward compatibility
+      userTags: userSkillIds,
     });
   } catch (err) {
     console.error(err);

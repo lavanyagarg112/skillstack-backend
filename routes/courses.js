@@ -1,4 +1,3 @@
-// routes/courses.js
 const express = require("express");
 const pool = require("../database/db");
 const router = express.Router();
@@ -37,7 +36,9 @@ router.post("/", async (req, res) => {
     return res.status(400).json({ message: "courseName is required" });
   }
   if (!channelId || !levelId) {
-    return res.status(400).json({ message: "channelId and levelId are required" });
+    return res
+      .status(400)
+      .json({ message: "channelId and levelId are required" });
   }
 
   const client = await pool.connect();
@@ -174,17 +175,21 @@ router.post("/get-course", async (req, res) => {
     );
 
     const channelLevel = channelLevelRes.rows[0] || null;
-    const channel = channelLevel ? {
-      id: channelLevel.channel_id,
-      name: channelLevel.channel_name,
-      description: channelLevel.channel_description
-    } : null;
-    const level = channelLevel ? {
-      id: channelLevel.level_id,
-      name: channelLevel.level_name,
-      description: channelLevel.level_description,
-      sort_order: channelLevel.sort_order
-    } : null;
+    const channel = channelLevel
+      ? {
+          id: channelLevel.channel_id,
+          name: channelLevel.channel_name,
+          description: channelLevel.channel_description,
+        }
+      : null;
+    const level = channelLevel
+      ? {
+          id: channelLevel.level_id,
+          name: channelLevel.level_name,
+          description: channelLevel.level_description,
+          sort_order: channelLevel.sort_order,
+        }
+      : null;
 
     await client.query("COMMIT");
     return res.status(200).json({
@@ -287,8 +292,6 @@ router.put("/", async (req, res) => {
     if (!courseRes.rows.length) {
       throw new Error("Failed to update course");
     }
-
-    // const courseId = courseRes.rows[0].id;
 
     if (updateChannelLevel && channelId && levelId) {
       await client.query(`DELETE FROM course_channels WHERE course_id = $1`, [
@@ -468,7 +471,6 @@ router.post("/add-module", upload.single("file"), async (req, res) => {
     }
 
     if (type === "quiz") {
-      // revision for this module
       const revRes = await client.query(
         `INSERT INTO revisions (module_id, revision_number)
            VALUES ($1,
@@ -479,7 +481,6 @@ router.post("/add-module", upload.single("file"), async (req, res) => {
       );
       const revisionId = revRes.rows[0].id;
 
-      // 4) Create the quiz record
       const quizRes = await client.query(
         `INSERT INTO quizzes (revision_id, title, quiz_type)
            VALUES ($1,$2,$3)
@@ -488,7 +489,6 @@ router.post("/add-module", upload.single("file"), async (req, res) => {
       );
       const quizId = quizRes.rows[0].id;
 
-      // 5) Insert questions + options
       const qs = JSON.parse(questions);
       for (let i = 0; i < qs.length; i++) {
         const { question_text, question_type, options } = qs[i];
@@ -606,7 +606,6 @@ router.post("/get-module", async (req, res) => {
     const module = moduleRes.rows[0];
 
     if (module.module_type === "quiz") {
-      // 2a) get the latest revision
       const revRes = await client.query(
         `SELECT id
            FROM revisions
@@ -955,7 +954,6 @@ router.get("/all-user-courses", async (req, res) => {
   try {
     await client.query("BEGIN");
 
-    // 1) "Enrolled" courses (status = 'enrolled')
     const enrolledRes = await client.query(
       `
       SELECT
@@ -998,7 +996,6 @@ GROUP BY c.id, c.name, c.description;
       [userId]
     );
 
-    // 2) "Completed" courses (status = 'completed')
     const completedRes = await client.query(
       `
       SELECT
@@ -1040,7 +1037,6 @@ GROUP BY c.id, c.name, c.description;
       [userId]
     );
 
-    // 3) Others in same org, not enrolled at all
     const otherRes = await client.query(
       `
       SELECT c.id, c.name, c.description,
@@ -1903,7 +1899,7 @@ router.post("/add-channel", async (req, res) => {
     await client.query(
       `INSERT INTO channels (name, description, organisation_id)
        VALUES ($1, $2, $3)`,
-      [name, description || '', organisationId]
+      [name, description || "", organisationId]
     );
     await client.query("COMMIT");
     return res.status(201).json({ success: true });
@@ -1946,7 +1942,10 @@ router.delete("/delete-channel", async (req, res) => {
   const client = await pool.connect();
   try {
     await client.query("BEGIN");
-    await client.query(`DELETE FROM channels WHERE id = $1 AND organisation_id = $2`, [channelId, organisationId]);
+    await client.query(
+      `DELETE FROM channels WHERE id = $1 AND organisation_id = $2`,
+      [channelId, organisationId]
+    );
     await client.query("COMMIT");
     return res.status(200).json({ success: true });
   } catch (err) {
@@ -2021,7 +2020,7 @@ router.post("/add-level", async (req, res) => {
     await client.query(
       `INSERT INTO levels (name, description, sort_order, organisation_id)
        VALUES ($1, $2, $3, $4)`,
-      [name, description || '', sort_order || 0, organisationId]
+      [name, description || "", sort_order || 0, organisationId]
     );
     await client.query("COMMIT");
     return res.status(201).json({ success: true });
@@ -2064,7 +2063,10 @@ router.delete("/delete-level", async (req, res) => {
   const client = await pool.connect();
   try {
     await client.query("BEGIN");
-    await client.query(`DELETE FROM levels WHERE id = $1 AND organisation_id = $2`, [levelId, organisationId]);
+    await client.query(
+      `DELETE FROM levels WHERE id = $1 AND organisation_id = $2`,
+      [levelId, organisationId]
+    );
     await client.query("COMMIT");
     return res.status(200).json({ success: true });
   } catch (err) {
@@ -2139,7 +2141,7 @@ router.post("/add-skill", async (req, res) => {
     await client.query(
       `INSERT INTO skills (name, description, organisation_id)
        VALUES ($1, $2, $3)`,
-      [name, description || '', organisationId]
+      [name, description || "", organisationId]
     );
     await client.query("COMMIT");
     return res.status(201).json({ success: true });
@@ -2182,7 +2184,10 @@ router.delete("/delete-skill", async (req, res) => {
   const client = await pool.connect();
   try {
     await client.query("BEGIN");
-    await client.query(`DELETE FROM skills WHERE id = $1 AND organisation_id = $2`, [skillId, organisationId]);
+    await client.query(
+      `DELETE FROM skills WHERE id = $1 AND organisation_id = $2`,
+      [skillId, organisationId]
+    );
     await client.query("COMMIT");
     return res.status(200).json({ success: true });
   } catch (err) {

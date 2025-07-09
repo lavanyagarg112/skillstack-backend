@@ -21,7 +21,6 @@ router.get("/progress", async (req, res) => {
   try {
     await client.query("BEGIN");
 
-    // 1) Courses done
     const { rows: coursesDone } = await client.query(
       `SELECT c.id, c.name, e.completed_at,
               JSON_BUILD_OBJECT(
@@ -46,7 +45,6 @@ router.get("/progress", async (req, res) => {
       [userId]
     );
 
-    // 2) Modules done
     const { rows: modCount } = await client.query(
       `SELECT COUNT(*) AS modules_done
          FROM module_status ms
@@ -58,7 +56,6 @@ router.get("/progress", async (req, res) => {
     );
     const modulesDone = parseInt(modCount[0].modules_done, 10);
 
-    // 3) Quiz results (latest per quiz)
     const { rows: quizResults } = await client.query(
       `WITH latest AS (
          SELECT DISTINCT ON (qr.quiz_id)
@@ -89,7 +86,6 @@ router.get("/progress", async (req, res) => {
       [userId]
     );
 
-    // Strengths & weaknesses by skill
     const { rows: skillPerf } = await client.query(
       `WITH latest AS (
   SELECT DISTINCT ON (qr.quiz_id)

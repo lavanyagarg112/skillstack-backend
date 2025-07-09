@@ -408,11 +408,6 @@ router.delete("/skills", async (req, res) => {
   }
 });
 
-// =============================================================================
-// USER PREFERENCES ENDPOINTS (Channels and Levels)
-// =============================================================================
-
-// GET /api/users/preferences - Get user's channel and level preferences along with available options
 router.get("/preferences", async (req, res) => {
   const { auth } = req.cookies;
   if (!auth) return res.status(401).json({ message: "Not authenticated" });
@@ -431,7 +426,6 @@ router.get("/preferences", async (req, res) => {
   try {
     await client.query("BEGIN");
 
-    // Get user's channel preferences
     const userChannelsResult = await client.query(
       `SELECT uc.id, uc.channel_id, c.name as channel_name, c.description as channel_description, uc.preference_rank
        FROM user_channels uc
@@ -441,7 +435,6 @@ router.get("/preferences", async (req, res) => {
       [userId]
     );
 
-    // Get user's level preferences
     const userLevelsResult = await client.query(
       `SELECT ul.id, ul.level_id, l.name as level_name, l.description as level_description, l.sort_order, ul.preference_rank
        FROM user_levels ul
@@ -451,7 +444,6 @@ router.get("/preferences", async (req, res) => {
       [userId]
     );
 
-    // Get all available channels for the organization
     const allChannelsResult = await client.query(
       `SELECT id, name, description
        FROM channels
@@ -460,7 +452,6 @@ router.get("/preferences", async (req, res) => {
       [organisationId]
     );
 
-    // Get all available levels for the organization
     const allLevelsResult = await client.query(
       `SELECT id, name, description, sort_order
        FROM levels
@@ -475,7 +466,7 @@ router.get("/preferences", async (req, res) => {
       userChannels: userChannelsResult.rows,
       userLevels: userLevelsResult.rows,
       availableChannels: allChannelsResult.rows,
-      availableLevels: allLevelsResult.rows
+      availableLevels: allLevelsResult.rows,
     });
   } catch (error) {
     await client.query("ROLLBACK");
@@ -486,7 +477,6 @@ router.get("/preferences", async (req, res) => {
   }
 });
 
-// POST /api/users/preferences/channels - Add channel preference
 router.post("/preferences/channels", async (req, res) => {
   const { auth } = req.cookies;
   if (!auth) return res.status(401).json({ message: "Not authenticated" });
@@ -510,7 +500,6 @@ router.post("/preferences/channels", async (req, res) => {
   try {
     await client.query("BEGIN");
 
-    // Verify channel belongs to user's organization
     const channelCheck = await client.query(
       "SELECT id FROM channels WHERE id = $1 AND organisation_id = $2",
       [channel_id, organisationId]
@@ -521,7 +510,6 @@ router.post("/preferences/channels", async (req, res) => {
       return res.status(400).json({ message: "Invalid channel" });
     }
 
-    // Check if preference already exists
     const existingResult = await client.query(
       "SELECT id FROM user_channels WHERE user_id = $1 AND channel_id = $2",
       [userId, channel_id]
@@ -529,10 +517,11 @@ router.post("/preferences/channels", async (req, res) => {
 
     if (existingResult.rows.length > 0) {
       await client.query("ROLLBACK");
-      return res.status(400).json({ message: "Channel preference already exists" });
+      return res
+        .status(400)
+        .json({ message: "Channel preference already exists" });
     }
 
-    // Get next preference rank
     const rankResult = await client.query(
       "SELECT COALESCE(MAX(preference_rank), 0) + 1 as next_rank FROM user_channels WHERE user_id = $1",
       [userId]
@@ -540,7 +529,6 @@ router.post("/preferences/channels", async (req, res) => {
 
     const nextRank = rankResult.rows[0].next_rank;
 
-    // Add channel preference
     await client.query(
       "INSERT INTO user_channels (user_id, channel_id, preference_rank) VALUES ($1, $2, $3)",
       [userId, channel_id, nextRank]
@@ -557,7 +545,6 @@ router.post("/preferences/channels", async (req, res) => {
   }
 });
 
-// POST /api/users/preferences/levels - Add level preference
 router.post("/preferences/levels", async (req, res) => {
   const { auth } = req.cookies;
   if (!auth) return res.status(401).json({ message: "Not authenticated" });
@@ -581,7 +568,6 @@ router.post("/preferences/levels", async (req, res) => {
   try {
     await client.query("BEGIN");
 
-    // Verify level belongs to user's organization
     const levelCheck = await client.query(
       "SELECT id FROM levels WHERE id = $1 AND organisation_id = $2",
       [level_id, organisationId]
@@ -592,7 +578,6 @@ router.post("/preferences/levels", async (req, res) => {
       return res.status(400).json({ message: "Invalid level" });
     }
 
-    // Check if preference already exists
     const existingResult = await client.query(
       "SELECT id FROM user_levels WHERE user_id = $1 AND level_id = $2",
       [userId, level_id]
@@ -600,10 +585,11 @@ router.post("/preferences/levels", async (req, res) => {
 
     if (existingResult.rows.length > 0) {
       await client.query("ROLLBACK");
-      return res.status(400).json({ message: "Level preference already exists" });
+      return res
+        .status(400)
+        .json({ message: "Level preference already exists" });
     }
 
-    // Get next preference rank
     const rankResult = await client.query(
       "SELECT COALESCE(MAX(preference_rank), 0) + 1 as next_rank FROM user_levels WHERE user_id = $1",
       [userId]
@@ -611,7 +597,6 @@ router.post("/preferences/levels", async (req, res) => {
 
     const nextRank = rankResult.rows[0].next_rank;
 
-    // Add level preference
     await client.query(
       "INSERT INTO user_levels (user_id, level_id, preference_rank) VALUES ($1, $2, $3)",
       [userId, level_id, nextRank]
@@ -628,7 +613,6 @@ router.post("/preferences/levels", async (req, res) => {
   }
 });
 
-// DELETE /api/users/preferences/channels - Remove channel preference
 router.delete("/preferences/channels", async (req, res) => {
   const { auth } = req.cookies;
   if (!auth) return res.status(401).json({ message: "Not authenticated" });
@@ -651,7 +635,6 @@ router.delete("/preferences/channels", async (req, res) => {
   try {
     await client.query("BEGIN");
 
-    // Remove channel preference
     const result = await client.query(
       "DELETE FROM user_channels WHERE user_id = $1 AND channel_id = $2",
       [userId, channel_id]
@@ -673,7 +656,6 @@ router.delete("/preferences/channels", async (req, res) => {
   }
 });
 
-// DELETE /api/users/preferences/levels - Remove level preference
 router.delete("/preferences/levels", async (req, res) => {
   const { auth } = req.cookies;
   if (!auth) return res.status(401).json({ message: "Not authenticated" });
@@ -696,7 +678,6 @@ router.delete("/preferences/levels", async (req, res) => {
   try {
     await client.query("BEGIN");
 
-    // Remove level preference
     const result = await client.query(
       "DELETE FROM user_levels WHERE user_id = $1 AND level_id = $2",
       [userId, level_id]
@@ -717,6 +698,5 @@ router.delete("/preferences/levels", async (req, res) => {
     client.release();
   }
 });
-
 
 module.exports = router;

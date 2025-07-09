@@ -7,7 +7,6 @@ const {
   ensureUserEnrolledInCourses,
 } = require("./roadmaps-helpers");
 
-// Helper function to parse auth cookie
 function getAuthUser(req) {
   const { auth } = req.cookies;
   if (!auth) return null;
@@ -18,7 +17,6 @@ function getAuthUser(req) {
   }
 }
 
-// GET /api/roadmaps - Get user's roadmaps
 router.get("/", async (req, res) => {
   const user = getAuthUser(req);
   if (!user || !user.isLoggedIn) {
@@ -41,7 +39,6 @@ router.get("/", async (req, res) => {
   }
 });
 
-// POST /api/roadmaps - Create new roadmap
 router.post("/", async (req, res) => {
   const user = getAuthUser(req);
   if (!user || !user.isLoggedIn) {
@@ -68,7 +65,6 @@ router.post("/", async (req, res) => {
   }
 });
 
-// PUT /api/roadmaps/:id - Update roadmap
 router.put("/:id", async (req, res) => {
   const user = getAuthUser(req);
   if (!user || !user.isLoggedIn) {
@@ -102,7 +98,6 @@ router.put("/:id", async (req, res) => {
   }
 });
 
-// DELETE /api/roadmaps/:id - Delete roadmap
 router.delete("/:id", async (req, res) => {
   const user = getAuthUser(req);
   if (!user || !user.isLoggedIn) {
@@ -130,7 +125,6 @@ router.delete("/:id", async (req, res) => {
   }
 });
 
-// GET /api/roadmaps/:id/items - Get roadmap modules with details
 router.get("/:id/items", async (req, res) => {
   const user = getAuthUser(req);
   if (!user || !user.isLoggedIn) {
@@ -140,7 +134,6 @@ router.get("/:id/items", async (req, res) => {
   const { id } = req.params;
 
   try {
-    // First verify the roadmap belongs to the user
     const roadmapCheck = await pool.query(
       `SELECT id FROM roadmaps WHERE id = $1 AND user_id = $2`,
       [id, user.userId]
@@ -150,7 +143,6 @@ router.get("/:id/items", async (req, res) => {
       return res.status(404).json({ message: "Roadmap not found" });
     }
 
-    // Get roadmap items with module details
     const result = await pool.query(
       `SELECT 
          ri.position,
@@ -197,7 +189,6 @@ router.get("/:id/items", async (req, res) => {
   }
 });
 
-// POST /api/roadmaps/:id/items - Add module to roadmap
 router.post("/:id/items", async (req, res) => {
   const user = getAuthUser(req);
   if (!user || !user.isLoggedIn) {
@@ -215,7 +206,6 @@ router.post("/:id/items", async (req, res) => {
   try {
     await client.query("BEGIN");
 
-    // Verify roadmap belongs to user
     const roadmapCheck = await client.query(
       `SELECT id FROM roadmaps WHERE id = $1 AND user_id = $2`,
       [id, user.userId]
@@ -226,7 +216,6 @@ router.post("/:id/items", async (req, res) => {
       return res.status(404).json({ message: "Roadmap not found" });
     }
 
-    // Check if module is already in roadmap
     const existingCheck = await client.query(
       `SELECT 1 FROM roadmap_items WHERE roadmap_id = $1 AND module_id = $2`,
       [id, module_id]
@@ -237,7 +226,6 @@ router.post("/:id/items", async (req, res) => {
       return res.status(400).json({ message: "Module already in roadmap" });
     }
 
-    // Get next position
     const positionResult = await client.query(
       `SELECT COALESCE(MAX(position), 0) + 1 as next_position 
        FROM roadmap_items WHERE roadmap_id = $1`,
@@ -246,7 +234,6 @@ router.post("/:id/items", async (req, res) => {
 
     const nextPosition = positionResult.rows[0].next_position;
 
-    // Get course ID from module and auto-enroll user
     const courseIds = await getCoursesFromModules(client, [module_id]);
     const enrolledCourses = await ensureUserEnrolledInCourses(
       client,
@@ -254,7 +241,6 @@ router.post("/:id/items", async (req, res) => {
       courseIds
     );
 
-    // Add module to roadmap
     await client.query(
       `INSERT INTO roadmap_items (roadmap_id, module_id, position)
        VALUES ($1, $2, $3)`,
@@ -277,7 +263,6 @@ router.post("/:id/items", async (req, res) => {
   }
 });
 
-// PUT /api/roadmaps/:id/items/:moduleId - Update item position
 router.put("/:id/items/:moduleId", async (req, res) => {
   const user = getAuthUser(req);
   if (!user || !user.isLoggedIn) {
@@ -295,7 +280,6 @@ router.put("/:id/items/:moduleId", async (req, res) => {
   try {
     await client.query("BEGIN");
 
-    // Verify roadmap belongs to user
     const roadmapCheck = await client.query(
       `SELECT id FROM roadmaps WHERE id = $1 AND user_id = $2`,
       [id, user.userId]
@@ -306,7 +290,6 @@ router.put("/:id/items/:moduleId", async (req, res) => {
       return res.status(404).json({ message: "Roadmap not found" });
     }
 
-    // Update position
     const result = await client.query(
       `UPDATE roadmap_items 
        SET position = $1 
@@ -335,7 +318,6 @@ router.put("/:id/items/:moduleId", async (req, res) => {
   }
 });
 
-// DELETE /api/roadmaps/:id/items/:moduleId - Remove module from roadmap (does not unenroll from course)
 router.delete("/:id/items/:moduleId", async (req, res) => {
   const user = getAuthUser(req);
   if (!user || !user.isLoggedIn) {
@@ -345,8 +327,6 @@ router.delete("/:id/items/:moduleId", async (req, res) => {
   const { id, moduleId } = req.params;
 
   try {
-    // Verify roadmap belongs to user and remove item
-    // Note: We do NOT auto-unenroll from courses as user may be taking them independently
     const result = await pool.query(
       `DELETE FROM roadmap_items 
        WHERE roadmap_id = $1 AND module_id = $2
@@ -369,7 +349,6 @@ router.delete("/:id/items/:moduleId", async (req, res) => {
   }
 });
 
-// POST /api/roadmaps/generate - Auto-generate roadmap based on user's onboarding skills
 router.post("/generate", async (req, res) => {
   const user = getAuthUser(req);
   if (!user || !user.isLoggedIn) {
@@ -390,7 +369,6 @@ router.post("/generate", async (req, res) => {
   try {
     await client.query("BEGIN");
 
-    // 1. Create the roadmap
     const roadmapResult = await client.query(
       `INSERT INTO roadmaps (user_id, name) 
        VALUES ($1, $2) 
@@ -400,7 +378,6 @@ router.post("/generate", async (req, res) => {
 
     const roadmap = roadmapResult.rows[0];
 
-    // 2. Get user's skills from onboarding responses
     const userSkillsResult = await client.query(
       `SELECT DISTINCT oqo.skill_id
        FROM onboarding_responses or_table
@@ -409,7 +386,6 @@ router.post("/generate", async (req, res) => {
       [user.userId]
     );
 
-    // 3. Get user's channel and level preferences (combines member settings and onboarding)
     const userPreferences = await getUserPreferences(client, user.userId);
 
     const userSkillIds = userSkillsResult.rows.map((row) => row.skill_id);
@@ -418,25 +394,28 @@ router.post("/generate", async (req, res) => {
     let modulesAdded = 0;
     let enrolledCourses = [];
 
-    if (userSkillIds.length > 0) {
-      // 4. Get recommended modules with enhanced scoring based on member preferences
-      // Exclude modules that the user has already completed
+    const hasPreferences =
+      userSkillIds.length > 0 ||
+      userChannelIds.length > 0 ||
+      userLevelIds.length > 0;
+
+    if (hasPreferences) {
       let query = `SELECT DISTINCT
            mod.id,
-           COUNT(DISTINCT ms.skill_id) as matching_skills,
+           COALESCE(COUNT(DISTINCT ms.skill_id), 0) as matching_skills,
            CASE 
-             WHEN cc.channel_id = ANY($3) THEN 
+             WHEN cc.channel_id = ANY($2) THEN 
                CASE 
-                 WHEN cc.channel_id = ANY($5) THEN 5  -- Member setting preference (highest priority)
+                 WHEN cc.channel_id = ANY($4) THEN 5  -- Member setting preference (highest priority)
                  ELSE 3  -- Onboarding preference
                END
              WHEN cc.channel_id IS NOT NULL THEN 1 
              ELSE 0 
            END as channel_match,
            CASE 
-             WHEN cc.level_id = ANY($4) THEN 
+             WHEN cc.level_id = ANY($3) THEN 
                CASE 
-                 WHEN cc.level_id = ANY($6) THEN 5  -- Member setting preference (highest priority)
+                 WHEN cc.level_id = ANY($5) THEN 5  -- Member setting preference (highest priority)
                  ELSE 3  -- Onboarding preference
                END
              WHEN cc.level_id IS NOT NULL THEN 1 
@@ -447,17 +426,15 @@ router.post("/generate", async (req, res) => {
            RANDOM() as random_score
          FROM modules mod
          JOIN courses c ON c.id = mod.course_id
-         JOIN module_skills ms ON ms.module_id = mod.id
+         LEFT JOIN module_skills ms ON ms.module_id = mod.id
          LEFT JOIN course_channels cc ON cc.course_id = c.id
-         LEFT JOIN enrollments e ON e.course_id = c.id AND e.user_id = $7
+         LEFT JOIN enrollments e ON e.course_id = c.id AND e.user_id = $6
          LEFT JOIN module_status mst ON mst.module_id = mod.id AND mst.enrollment_id = e.id
          WHERE c.organisation_id = $1 
-           AND ms.skill_id = ANY($2)
            AND (mst.status IS NULL OR mst.status IN ('not_started', 'in_progress'))`;
 
-      const params = [
+      let params = [
         organisationId,
-        userSkillIds,
         userChannelIds,
         userLevelIds,
         userPreferences.channels.member,
@@ -465,35 +442,36 @@ router.post("/generate", async (req, res) => {
         user.userId,
       ];
 
-      // Add additional filtering for preferred channels and levels if they exist
-      if (userChannelIds.length > 0 || userLevelIds.length > 0) {
-        query += ` AND (`;
-        const conditions = [];
-
-        if (userChannelIds.length > 0) {
-          conditions.push(`cc.channel_id = ANY($3)`);
-        }
-
-        if (userLevelIds.length > 0) {
-          conditions.push(`cc.level_id = ANY($4)`);
-        }
-
-        // Also include modules without specific channel/level assignments
-        conditions.push(`cc.channel_id IS NULL OR cc.level_id IS NULL`);
-
-        query += conditions.join(" OR ") + ")";
+      if (userSkillIds.length > 0) {
+        query += ` AND ms.skill_id = ANY($7)`;
+        params.push(userSkillIds);
       }
 
       query += ` GROUP BY mod.id, cc.channel_id, cc.level_id
          ORDER BY matching_skills DESC, channel_match DESC, level_match DESC, random_score
          LIMIT 10`; // Limit to top 10 modules
 
+      console.log("Generated Query:", query);
+      console.log("Query Parameters:", params);
+
       const modulesResult = await client.query(query, params);
+
+      console.log("Query Results:", modulesResult.rows.length, "modules found");
+      console.log(
+        "Module Details:",
+        modulesResult.rows.map((row) => ({
+          id: row.id,
+          matching_skills: row.matching_skills,
+          channel_match: row.channel_match,
+          level_match: row.level_match,
+          channel_id: row.channel_id,
+          level_id: row.level_id,
+        }))
+      );
 
       if (modulesResult.rows.length > 0) {
         const moduleIds = modulesResult.rows.map((row) => row.id);
 
-        // 5. Get courses from these modules and auto-enroll user
         const courseIds = await getCoursesFromModules(client, moduleIds);
         enrolledCourses = await ensureUserEnrolledInCourses(
           client,
@@ -501,7 +479,6 @@ router.post("/generate", async (req, res) => {
           courseIds
         );
 
-        // 6. Add modules to roadmap
         for (let i = 0; i < modulesResult.rows.length; i++) {
           const module = modulesResult.rows[i];
           await client.query(
