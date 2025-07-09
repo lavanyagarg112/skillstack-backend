@@ -283,7 +283,7 @@ CREATE TABLE roadmap_items (
     id           SERIAL PRIMARY KEY,
     question_id  INTEGER NOT NULL REFERENCES onboarding_questions(id) ON DELETE CASCADE,
     option_text  TEXT NOT NULL,
-    tag_id       INTEGER NOT NULL REFERENCES tags(id) ON DELETE CASCADE
+    tag_id       INTEGER REFERENCES tags(id) ON DELETE CASCADE
   );
 
   -- Table to store user responses

@@ -43,7 +43,7 @@ router.get("/questions", async (req, res) => {
         `
         SELECT oqo.id, oqo.option_text, oqo.tag_id, t.name as tag_name
         FROM onboarding_question_options oqo
-        JOIN tags t ON t.id = oqo.tag_id
+        LEFT JOIN tags t ON t.id = oqo.tag_id
         WHERE oqo.question_id = $1
         ORDER BY oqo.id ASC
       `,
@@ -110,10 +110,8 @@ router.post("/questions/:id/options", async (req, res) => {
   const { id } = req.params;
   const { option_text, tag_id } = req.body;
 
-  if (!option_text || !tag_id) {
-    return res
-      .status(400)
-      .json({ message: "option_text and tag_id are required" });
+  if (!option_text) {
+    return res.status(400).json({ message: "option_text is required" });
   }
 
   const client = await pool.connect();
@@ -129,13 +127,15 @@ router.post("/questions/:id/options", async (req, res) => {
       return res.status(404).json({ message: "Question not found" });
     }
 
-    const tagCheck = await client.query(
-      "SELECT id, name FROM tags WHERE id = $1",
-      [tag_id]
-    );
-    if (tagCheck.rows.length === 0) {
-      await client.query("ROLLBACK");
-      return res.status(404).json({ message: "Tag not found" });
+    let tagCheck = { rows: [] };
+    if (tag_id) {
+      tagCheck = await client.query("SELECT id, name FROM tags WHERE id = $1", [
+        tag_id,
+      ]);
+      if (tagCheck.rows.length === 0) {
+        await client.query("ROLLBACK");
+        return res.status(404).json({ message: "Tag not found" });
+      }
     }
 
     const result = await client.query(
@@ -144,14 +144,14 @@ router.post("/questions/:id/options", async (req, res) => {
       VALUES ($1, $2, $3)
       RETURNING id, option_text, tag_id
     `,
-      [id, option_text, tag_id]
+      [id, option_text, tag_id || null]
     );
 
     await client.query("COMMIT");
 
     const option = {
       ...result.rows[0],
-      tag_name: tagCheck.rows[0].name,
+      tag_name: tag_id ? tagCheck.rows[0].name : null,
     };
 
     res.status(201).json({ option });
@@ -198,11 +198,6 @@ router.post("/responses", async (req, res) => {
   if (!user || !user.isLoggedIn) {
     return res.status(401).json({ message: "Not logged in" });
   }
-
-  if (!isEmployee(user)) {
-    return res.status(403).json({ message: "Employee access required" });
-  }
-
   const { option_ids } = req.body;
   if (!option_ids || !Array.isArray(option_ids) || option_ids.length === 0) {
     return res.status(400).json({ message: "option_ids array is required" });
@@ -267,7 +262,7 @@ router.get("/responses", async (req, res) => {
       FROM onboarding_responses or
       JOIN onboarding_question_options oqo ON oqo.id = or.option_id
       JOIN onboarding_questions oq ON oq.id = oqo.question_id
-      JOIN tags t ON t.id = oqo.tag_id
+      LEFT JOIN tags t ON t.id = oqo.tag_id
       WHERE or.user_id = $1
       ORDER BY oq.position ASC
     `,
