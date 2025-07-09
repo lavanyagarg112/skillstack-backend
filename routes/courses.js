@@ -1,4 +1,3 @@
-// routes/courses.js
 const express = require("express");
 const pool = require("../database/db");
 const router = express.Router();
@@ -31,9 +30,15 @@ router.post("/", async (req, res) => {
   }
   const courseName = req.body.courseName;
   const courseDescription = req.body.description || "";
-  const courseTags = req.body.tags || [];
+  const channelId = req.body.channelId;
+  const levelId = req.body.levelId;
   if (!courseName) {
     return res.status(400).json({ message: "courseName is required" });
+  }
+  if (!channelId || !levelId) {
+    return res
+      .status(400)
+      .json({ message: "channelId and levelId are required" });
   }
 
   const client = await pool.connect();
@@ -51,20 +56,13 @@ router.post("/", async (req, res) => {
       throw new Error("Failed to create course");
     }
 
-    if (courseTags.length) {
-      const courseId = courseRes.rows[0].id;
-      for (const t of courseTags) {
-        if (typeof t !== "number") {
-          throw new Error("Invalid tag ID");
-        }
-        await client.query(
-          `INSERT INTO course_tags (course_id, tag_id)
-         VALUES ($1, $2)
+    const courseId = courseRes.rows[0].id;
+    await client.query(
+      `INSERT INTO course_channels (course_id, channel_id, level_id)
+       VALUES ($1, $2, $3)
        ON CONFLICT DO NOTHING`,
-          [courseId, t]
-        );
-      }
-    }
+      [courseId, channelId, levelId]
+    );
 
     await client.query("COMMIT");
     return res.status(201).json({ success: true });
@@ -102,20 +100,22 @@ router.get("/", async (req, res) => {
         c.id,
         c.name,
         c.description,
-        -- aggregate tags into an array of { id, name }
-        COALESCE(
-          JSON_AGG(
-            JSON_BUILD_OBJECT('id', t.id, 'name', t.name)
-          ) FILTER (WHERE t.id IS NOT NULL),
-          '[]'
-        ) AS tags
+        JSON_BUILD_OBJECT(
+          'id', ch.id,
+          'name', ch.name,
+          'description', ch.description
+        ) AS channel,
+        JSON_BUILD_OBJECT(
+          'id', l.id,
+          'name', l.name,
+          'description', l.description,
+          'sort_order', l.sort_order
+        ) AS level
       FROM courses c
-      LEFT JOIN course_tags ct
-        ON ct.course_id = c.id
-      LEFT JOIN tags t
-        ON t.id = ct.tag_id
+      LEFT JOIN course_channels cc ON cc.course_id = c.id
+      LEFT JOIN channels ch ON ch.id = cc.channel_id
+      LEFT JOIN levels l ON l.id = cc.level_id
       WHERE c.organisation_id = $1
-      GROUP BY c.id, c.name, c.description
       ORDER BY c.name
       `,
       [organisationId]
@@ -163,19 +163,41 @@ router.post("/get-course", async (req, res) => {
       return res.status(404).json({ message: "Course not found" });
     }
 
-    const tags = await client.query(
-      `SELECT t.id, t.name FROM course_tags ct
-      JOIN tags t ON ct.tag_id = t.id
-      WHERE ct.course_id = $1`,
+    const channelLevelRes = await client.query(
+      `SELECT 
+        ch.id as channel_id, ch.name as channel_name, ch.description as channel_description,
+        l.id as level_id, l.name as level_name, l.description as level_description, l.sort_order
+      FROM course_channels cc
+      JOIN channels ch ON cc.channel_id = ch.id
+      JOIN levels l ON cc.level_id = l.id
+      WHERE cc.course_id = $1`,
       [courseId]
     );
+
+    const channelLevel = channelLevelRes.rows[0] || null;
+    const channel = channelLevel
+      ? {
+          id: channelLevel.channel_id,
+          name: channelLevel.channel_name,
+          description: channelLevel.channel_description,
+        }
+      : null;
+    const level = channelLevel
+      ? {
+          id: channelLevel.level_id,
+          name: channelLevel.level_name,
+          description: channelLevel.level_description,
+          sort_order: channelLevel.sort_order,
+        }
+      : null;
 
     await client.query("COMMIT");
     return res.status(200).json({
       id: courseRes.rows[0].id,
       name: courseRes.rows[0].name,
       description: courseRes.rows[0].description,
-      tags: tags.rows || [],
+      channel,
+      level,
     });
   } catch (err) {
     await client.query("ROLLBACK");
@@ -245,8 +267,9 @@ router.put("/", async (req, res) => {
   const courseId = req.body.courseId;
   const courseName = req.body.courseName;
   const courseDescription = req.body.description || "";
-  const courseTags = req.body.tags || [];
-  const updateTags = req.body.updateTags || false;
+  const channelId = req.body.channelId;
+  const levelId = req.body.levelId;
+  const updateChannelLevel = req.body.updateChannelLevel || false;
   if (!courseId || !courseName) {
     return res
       .status(400)
@@ -270,27 +293,17 @@ router.put("/", async (req, res) => {
       throw new Error("Failed to update course");
     }
 
-    // const courseId = courseRes.rows[0].id;
-
-    if (updateTags) {
-      await client.query(`DELETE FROM course_tags WHERE course_id = $1`, [
+    if (updateChannelLevel && channelId && levelId) {
+      await client.query(`DELETE FROM course_channels WHERE course_id = $1`, [
         courseId,
       ]);
 
-      if (courseTags.length) {
-        const courseId = courseRes.rows[0].id;
-        for (const t of courseTags) {
-          if (typeof t !== "number") {
-            throw new Error("Invalid tag ID");
-          }
-          await client.query(
-            `INSERT INTO course_tags (course_id, tag_id)
-         VALUES ($1, $2)
-       ON CONFLICT DO NOTHING`,
-            [courseId, t]
-          );
-        }
-      }
+      await client.query(
+        `INSERT INTO course_channels (course_id, channel_id, level_id)
+         VALUES ($1, $2, $3)
+         ON CONFLICT DO NOTHING`,
+        [courseId, channelId, levelId]
+      );
     }
 
     await client.query("COMMIT");
@@ -338,15 +351,15 @@ router.post("/get-modules", async (req, res) => {
     m.position,
     COALESCE(
       JSON_AGG(
-        JSON_BUILD_OBJECT('id', t.id, 'name', t.name)
-      ) FILTER (WHERE t.id IS NOT NULL),
+        JSON_BUILD_OBJECT('id', s.id, 'name', s.name, 'description', s.description)
+      ) FILTER (WHERE s.id IS NOT NULL),
       '[]'
-    ) AS tags
+    ) AS skills
   FROM modules m
-  LEFT JOIN module_tags mt
-    ON mt.module_id = m.id
-  LEFT JOIN tags t
-    ON t.id = mt.tag_id
+  LEFT JOIN module_skills ms
+    ON ms.module_id = m.id
+  LEFT JOIN skills s
+    ON s.id = ms.skill_id
   WHERE m.course_id = $1
   GROUP BY m.id
   ORDER BY m.position
@@ -379,7 +392,7 @@ router.post("/add-module", upload.single("file"), async (req, res) => {
   }
 
   const { courseId, name, type, description = "", questions } = req.body;
-  let moduleTags = req.body.moduleTags || [];
+  let moduleSkills = req.body.moduleSkills || [];
   if (!courseId || !name || !type) {
     return res
       .status(400)
@@ -396,8 +409,8 @@ router.post("/add-module", upload.single("file"), async (req, res) => {
       .json({ message: "file is required for non-quiz modules" });
   }
 
-  if (typeof moduleTags === "string") {
-    moduleTags = JSON.parse(moduleTags);
+  if (typeof moduleSkills === "string") {
+    moduleSkills = JSON.parse(moduleSkills);
   }
 
   const client = await pool.connect();
@@ -426,16 +439,16 @@ router.post("/add-module", upload.single("file"), async (req, res) => {
 
     const module_id = moduleRes.rows[0].id;
 
-    if (moduleTags && moduleTags.length) {
-      for (const t of moduleTags) {
-        if (typeof t.id !== "number") {
-          throw new Error("Invalid tag ID");
+    if (moduleSkills && moduleSkills.length) {
+      for (const s of moduleSkills) {
+        if (typeof s.id !== "number") {
+          throw new Error("Invalid skill ID");
         }
         await client.query(
-          `INSERT INTO module_tags (module_id, tag_id)
+          `INSERT INTO module_skills (module_id, skill_id)
        VALUES ($1, $2)
      ON CONFLICT DO NOTHING`,
-          [module_id, t.id]
+          [module_id, s.id]
         );
       }
     }
@@ -458,7 +471,6 @@ router.post("/add-module", upload.single("file"), async (req, res) => {
     }
 
     if (type === "quiz") {
-      // revision for this module
       const revRes = await client.query(
         `INSERT INTO revisions (module_id, revision_number)
            VALUES ($1,
@@ -469,7 +481,6 @@ router.post("/add-module", upload.single("file"), async (req, res) => {
       );
       const revisionId = revRes.rows[0].id;
 
-      // 4) Create the quiz record
       const quizRes = await client.query(
         `INSERT INTO quizzes (revision_id, title, quiz_type)
            VALUES ($1,$2,$3)
@@ -478,7 +489,6 @@ router.post("/add-module", upload.single("file"), async (req, res) => {
       );
       const quizId = quizRes.rows[0].id;
 
-      // 5) Insert questions + options
       const qs = JSON.parse(questions);
       for (let i = 0; i < qs.length; i++) {
         const { question_text, question_type, options } = qs[i];
@@ -585,18 +595,17 @@ router.post("/get-module", async (req, res) => {
       return res.status(404).json({ message: "Module not found" });
     }
 
-    const moduleTagsRes = await client.query(
-      `SELECT tag_id, t.name AS tag_name
-         FROM module_tags mt
-         JOIN tags t ON mt.tag_id = t.id
-        WHERE mt.module_id = $1`,
+    const moduleSkillsRes = await client.query(
+      `SELECT skill_id, s.name AS skill_name, s.description AS skill_description
+         FROM module_skills ms
+         JOIN skills s ON ms.skill_id = s.id
+        WHERE ms.module_id = $1`,
       [moduleId]
     );
 
     const module = moduleRes.rows[0];
 
     if (module.module_type === "quiz") {
-      // 2a) get the latest revision
       const revRes = await client.query(
         `SELECT id
            FROM revisions
@@ -661,9 +670,10 @@ router.post("/get-module", async (req, res) => {
       }
     }
 
-    module.tags = moduleTagsRes.rows.map((r) => ({
-      id: r.tag_id,
-      name: r.tag_name,
+    module.skills = moduleSkillsRes.rows.map((r) => ({
+      id: r.skill_id,
+      name: r.skill_name,
+      description: r.skill_description,
     }));
 
     await client.query("COMMIT");
@@ -697,10 +707,10 @@ router.put("/update-module", upload.single("file"), async (req, res) => {
     description = "",
     type,
     questions,
-    updateTags = false,
+    updateSkills = false,
   } = req.body;
 
-  let moduleTags = req.body.moduleTags || [];
+  let moduleSkills = req.body.moduleSkills || [];
 
   if (!moduleId || !name) {
     return res
@@ -708,8 +718,8 @@ router.put("/update-module", upload.single("file"), async (req, res) => {
       .json({ message: "moduleId, name and type are required" });
   }
 
-  if (typeof moduleTags === "string") {
-    moduleTags = JSON.parse(moduleTags);
+  if (typeof moduleSkills === "string") {
+    moduleSkills = JSON.parse(moduleSkills);
   }
 
   const file = req.file; // may be undefined for quiz
@@ -739,22 +749,22 @@ router.put("/update-module", upload.single("file"), async (req, res) => {
       );
     }
 
-    if (updateTags) {
+    if (updateSkills) {
       await client.query(
-        `DELETE FROM module_tags
+        `DELETE FROM module_skills
          WHERE module_id = $1`,
         [moduleId]
       );
-      if (moduleTags && moduleTags.length) {
-        for (const t of moduleTags) {
-          if (typeof t.id !== "number") {
-            throw new Error("Invalid tag ID");
+      if (moduleSkills && moduleSkills.length) {
+        for (const s of moduleSkills) {
+          if (typeof s.id !== "number") {
+            throw new Error("Invalid skill ID");
           }
           await client.query(
-            `INSERT INTO module_tags (module_id, tag_id)
+            `INSERT INTO module_skills (module_id, skill_id)
        VALUES ($1, $2)
      ON CONFLICT DO NOTHING`,
-            [moduleId, t.id]
+            [moduleId, s.id]
           );
         }
       }
@@ -944,7 +954,6 @@ router.get("/all-user-courses", async (req, res) => {
   try {
     await client.query("BEGIN");
 
-    // 1) “Enrolled” courses (status = 'enrolled')
     const enrolledRes = await client.query(
       `
       SELECT
@@ -955,14 +964,26 @@ router.get("/all-user-courses", async (req, res) => {
   COUNT(ms.id) FILTER (WHERE ms.status = 'completed')
                                           AS completed_modules,
   (
-    SELECT COALESCE(
-      JSON_AGG(JSON_BUILD_OBJECT('id', t2.id, 'name', t2.name)),
-      '[]'
+    SELECT JSON_BUILD_OBJECT(
+      'id', ch2.id,
+      'name', ch2.name,
+      'description', ch2.description
     )
-    FROM course_tags ct2
-    JOIN tags t2 ON t2.id = ct2.tag_id
-    WHERE ct2.course_id = c.id
-  ) AS tags
+    FROM course_channels cc2
+    JOIN channels ch2 ON ch2.id = cc2.channel_id
+    WHERE cc2.course_id = c.id
+  ) AS channel,
+  (
+    SELECT JSON_BUILD_OBJECT(
+      'id', l2.id,
+      'name', l2.name,
+      'description', l2.description,
+      'sort_order', l2.sort_order
+    )
+    FROM course_channels cc2
+    JOIN levels l2 ON l2.id = cc2.level_id
+    WHERE cc2.course_id = c.id
+  ) AS level
 FROM courses c
   JOIN enrollments e  ON e.course_id = c.id  AND e.user_id = $1  AND e.status = 'enrolled'
   LEFT JOIN modules m ON m.course_id = c.id
@@ -975,7 +996,6 @@ GROUP BY c.id, c.name, c.description;
       [userId]
     );
 
-    // 2) “Completed” courses (status = 'completed')
     const completedRes = await client.query(
       `
       SELECT
@@ -986,14 +1006,26 @@ GROUP BY c.id, c.name, c.description;
   COUNT(ms.id) FILTER (WHERE ms.status = 'completed')
                                           AS completed_modules,
   (
-    SELECT COALESCE(
-      JSON_AGG(JSON_BUILD_OBJECT('id', t2.id, 'name', t2.name)),
-      '[]'
+    SELECT JSON_BUILD_OBJECT(
+      'id', ch2.id,
+      'name', ch2.name,
+      'description', ch2.description
     )
-    FROM course_tags ct2
-    JOIN tags t2 ON t2.id = ct2.tag_id
-    WHERE ct2.course_id = c.id
-  ) AS tags
+    FROM course_channels cc2
+    JOIN channels ch2 ON ch2.id = cc2.channel_id
+    WHERE cc2.course_id = c.id
+  ) AS channel,
+  (
+    SELECT JSON_BUILD_OBJECT(
+      'id', l2.id,
+      'name', l2.name,
+      'description', l2.description,
+      'sort_order', l2.sort_order
+    )
+    FROM course_channels cc2
+    JOIN levels l2 ON l2.id = cc2.level_id
+    WHERE cc2.course_id = c.id
+  ) AS level
 FROM courses c
   JOIN enrollments e  ON e.course_id = c.id  AND e.user_id = $1  AND e.status = 'completed'
   LEFT JOIN modules m ON m.course_id = c.id
@@ -1005,28 +1037,34 @@ GROUP BY c.id, c.name, c.description;
       [userId]
     );
 
-    // 3) Others in same org, not enrolled at all
     const otherRes = await client.query(
       `
       SELECT c.id, c.name, c.description,
-      COALESCE(
-          JSON_AGG(
-            JSON_BUILD_OBJECT('id', t.id, 'name', t.name)
-          ) FILTER (WHERE t.id IS NOT NULL),
-          '[]'
-        ) AS tags
+      JSON_BUILD_OBJECT(
+        'id', ch.id,
+        'name', ch.name,
+        'description', ch.description
+      ) AS channel,
+      JSON_BUILD_OBJECT(
+        'id', l.id,
+        'name', l.name,
+        'description', l.description,
+        'sort_order', l.sort_order
+      ) AS level
       FROM courses c
-      LEFT JOIN course_tags ct
-        ON ct.course_id = c.id
-      LEFT JOIN tags t
-        ON t.id = ct.tag_id
+      LEFT JOIN course_channels cc
+        ON cc.course_id = c.id
+      LEFT JOIN channels ch
+        ON ch.id = cc.channel_id
+      LEFT JOIN levels l
+        ON l.id = cc.level_id
       WHERE c.organisation_id = $1
         AND c.id NOT IN (
           SELECT course_id
           FROM enrollments
           WHERE user_id = $2
         )
-        GROUP BY c.id, c.name, c.description
+        GROUP BY c.id, c.name, c.description, ch.id, ch.name, ch.description, l.id, l.name, l.description, l.sort_order
       `,
       [organisationId, userId]
     );
@@ -1798,57 +1836,8 @@ router.post("/mark-module-completed", async (req, res) => {
   }
 });
 
-router.post("/add-tags", async (req, res) => {
-  const { auth } = req.cookies;
-  if (!auth) return res.status(401).json({ message: "Not authenticated" });
-
-  let session;
-  try {
-    session = JSON.parse(auth);
-  } catch {
-    return res.status(400).json({ message: "Invalid session data" });
-  }
-
-  const userId = session.userId;
-  const organisationId = session.organisation?.id;
-  const isAdmin = session.organisation?.role === "admin";
-  if (!isAdmin) {
-    return res.status(403).json({ message: "Forbidden" });
-  }
-  if (!organisationId) {
-    return res.status(400).json({ message: "Organization required" });
-  }
-  const { tags } = req.body;
-  if (!Array.isArray(tags)) {
-    return res.status(400).json({ message: "tags[] are required" });
-  }
-
-  const client = await pool.connect();
-  try {
-    await client.query("BEGIN");
-    for (const tag of tags) {
-      if (!tag.name) {
-        continue; // skip if tag has no name
-      }
-      await client.query(
-        `INSERT INTO tags (name, organisation_id)
-         VALUES ($1, $2)
-         ON CONFLICT (name, organisation_id) DO NOTHING`,
-        [tag.name, organisationId]
-      );
-    }
-    await client.query("COMMIT");
-    return res.status(201).json({ success: true });
-  } catch (err) {
-    await client.query("ROLLBACK");
-    console.error(err);
-    return res.status(500).json({ message: "Server error" });
-  } finally {
-    client.release();
-  }
-});
-
-router.get("/tags", async (req, res) => {
+// CHANNELS ENDPOINTS
+router.get("/channels", async (req, res) => {
   const { auth } = req.cookies;
   if (!auth) return res.status(401).json({ message: "Not authenticated" });
 
@@ -1867,7 +1856,7 @@ router.get("/tags", async (req, res) => {
   const client = await pool.connect();
   try {
     const { rows } = await client.query(
-      `SELECT id, name FROM tags WHERE organisation_id = $1 ORDER BY name`,
+      `SELECT id, name, description FROM channels WHERE organisation_id = $1 ORDER BY name`,
       [organisationId]
     );
     res.json(rows);
@@ -1879,7 +1868,7 @@ router.get("/tags", async (req, res) => {
   }
 });
 
-router.delete("/delete-tag", async (req, res) => {
+router.post("/add-channel", async (req, res) => {
   const { auth } = req.cookies;
   if (!auth) return res.status(401).json({ message: "Not authenticated" });
 
@@ -1898,15 +1887,307 @@ router.delete("/delete-tag", async (req, res) => {
   if (!organisationId) {
     return res.status(400).json({ message: "Organization required" });
   }
-  const { tagId } = req.body;
-  if (!tagId) {
-    return res.status(400).json({ message: "tagId is required" });
+
+  const { name, description } = req.body;
+  if (!name) {
+    return res.status(400).json({ message: "name is required" });
   }
 
   const client = await pool.connect();
   try {
     await client.query("BEGIN");
-    await client.query(`DELETE FROM tags WHERE id = $1 AND organisation_id = $2`, [tagId, organisationId]);
+    await client.query(
+      `INSERT INTO channels (name, description, organisation_id)
+       VALUES ($1, $2, $3)`,
+      [name, description || "", organisationId]
+    );
+    await client.query("COMMIT");
+    return res.status(201).json({ success: true });
+  } catch (err) {
+    await client.query("ROLLBACK");
+    console.error(err);
+    if (err.code === "23505") {
+      return res.status(400).json({ message: "Channel name already exists" });
+    }
+    return res.status(500).json({ message: "Server error" });
+  } finally {
+    client.release();
+  }
+});
+
+router.delete("/delete-channel", async (req, res) => {
+  const { auth } = req.cookies;
+  if (!auth) return res.status(401).json({ message: "Not authenticated" });
+
+  let session;
+  try {
+    session = JSON.parse(auth);
+  } catch {
+    return res.status(400).json({ message: "Invalid session data" });
+  }
+
+  const organisationId = session.organisation?.id;
+  const isAdmin = session.organisation?.role === "admin";
+  if (!isAdmin) {
+    return res.status(403).json({ message: "Forbidden" });
+  }
+  if (!organisationId) {
+    return res.status(400).json({ message: "Organization required" });
+  }
+  const { channelId } = req.body;
+  if (!channelId) {
+    return res.status(400).json({ message: "channelId is required" });
+  }
+
+  const client = await pool.connect();
+  try {
+    await client.query("BEGIN");
+    await client.query(
+      `DELETE FROM channels WHERE id = $1 AND organisation_id = $2`,
+      [channelId, organisationId]
+    );
+    await client.query("COMMIT");
+    return res.status(200).json({ success: true });
+  } catch (err) {
+    await client.query("ROLLBACK");
+    console.error(err);
+    return res.status(500).json({ message: "Server error" });
+  } finally {
+    client.release();
+  }
+});
+
+// LEVELS ENDPOINTS
+router.get("/levels", async (req, res) => {
+  const { auth } = req.cookies;
+  if (!auth) return res.status(401).json({ message: "Not authenticated" });
+
+  let session;
+  try {
+    session = JSON.parse(auth);
+  } catch {
+    return res.status(400).json({ message: "Invalid session data" });
+  }
+
+  const organisationId = session.organisation?.id;
+  if (!organisationId) {
+    return res.status(400).json({ message: "Organization required" });
+  }
+
+  const client = await pool.connect();
+  try {
+    const { rows } = await client.query(
+      `SELECT id, name, description, sort_order FROM levels WHERE organisation_id = $1 ORDER BY sort_order, name`,
+      [organisationId]
+    );
+    res.json(rows);
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ message: "Server error" });
+  } finally {
+    client.release();
+  }
+});
+
+router.post("/add-level", async (req, res) => {
+  const { auth } = req.cookies;
+  if (!auth) return res.status(401).json({ message: "Not authenticated" });
+
+  let session;
+  try {
+    session = JSON.parse(auth);
+  } catch {
+    return res.status(400).json({ message: "Invalid session data" });
+  }
+
+  const organisationId = session.organisation?.id;
+  const isAdmin = session.organisation?.role === "admin";
+  if (!isAdmin) {
+    return res.status(403).json({ message: "Forbidden" });
+  }
+  if (!organisationId) {
+    return res.status(400).json({ message: "Organization required" });
+  }
+
+  const { name, description, sort_order } = req.body;
+  if (!name) {
+    return res.status(400).json({ message: "name is required" });
+  }
+
+  const client = await pool.connect();
+  try {
+    await client.query("BEGIN");
+    await client.query(
+      `INSERT INTO levels (name, description, sort_order, organisation_id)
+       VALUES ($1, $2, $3, $4)`,
+      [name, description || "", sort_order || 0, organisationId]
+    );
+    await client.query("COMMIT");
+    return res.status(201).json({ success: true });
+  } catch (err) {
+    await client.query("ROLLBACK");
+    console.error(err);
+    if (err.code === "23505") {
+      return res.status(400).json({ message: "Level name already exists" });
+    }
+    return res.status(500).json({ message: "Server error" });
+  } finally {
+    client.release();
+  }
+});
+
+router.delete("/delete-level", async (req, res) => {
+  const { auth } = req.cookies;
+  if (!auth) return res.status(401).json({ message: "Not authenticated" });
+
+  let session;
+  try {
+    session = JSON.parse(auth);
+  } catch {
+    return res.status(400).json({ message: "Invalid session data" });
+  }
+
+  const organisationId = session.organisation?.id;
+  const isAdmin = session.organisation?.role === "admin";
+  if (!isAdmin) {
+    return res.status(403).json({ message: "Forbidden" });
+  }
+  if (!organisationId) {
+    return res.status(400).json({ message: "Organization required" });
+  }
+  const { levelId } = req.body;
+  if (!levelId) {
+    return res.status(400).json({ message: "levelId is required" });
+  }
+
+  const client = await pool.connect();
+  try {
+    await client.query("BEGIN");
+    await client.query(
+      `DELETE FROM levels WHERE id = $1 AND organisation_id = $2`,
+      [levelId, organisationId]
+    );
+    await client.query("COMMIT");
+    return res.status(200).json({ success: true });
+  } catch (err) {
+    await client.query("ROLLBACK");
+    console.error(err);
+    return res.status(500).json({ message: "Server error" });
+  } finally {
+    client.release();
+  }
+});
+
+// SKILLS ENDPOINTS
+router.get("/skills", async (req, res) => {
+  const { auth } = req.cookies;
+  if (!auth) return res.status(401).json({ message: "Not authenticated" });
+
+  let session;
+  try {
+    session = JSON.parse(auth);
+  } catch {
+    return res.status(400).json({ message: "Invalid session data" });
+  }
+
+  const organisationId = session.organisation?.id;
+  if (!organisationId) {
+    return res.status(400).json({ message: "Organization required" });
+  }
+
+  const client = await pool.connect();
+  try {
+    const { rows } = await client.query(
+      `SELECT id, name, description FROM skills WHERE organisation_id = $1 ORDER BY name`,
+      [organisationId]
+    );
+    res.json(rows);
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ message: "Server error" });
+  } finally {
+    client.release();
+  }
+});
+
+router.post("/add-skill", async (req, res) => {
+  const { auth } = req.cookies;
+  if (!auth) return res.status(401).json({ message: "Not authenticated" });
+
+  let session;
+  try {
+    session = JSON.parse(auth);
+  } catch {
+    return res.status(400).json({ message: "Invalid session data" });
+  }
+
+  const organisationId = session.organisation?.id;
+  const isAdmin = session.organisation?.role === "admin";
+  if (!isAdmin) {
+    return res.status(403).json({ message: "Forbidden" });
+  }
+  if (!organisationId) {
+    return res.status(400).json({ message: "Organization required" });
+  }
+
+  const { name, description } = req.body;
+  if (!name) {
+    return res.status(400).json({ message: "name is required" });
+  }
+
+  const client = await pool.connect();
+  try {
+    await client.query("BEGIN");
+    await client.query(
+      `INSERT INTO skills (name, description, organisation_id)
+       VALUES ($1, $2, $3)`,
+      [name, description || "", organisationId]
+    );
+    await client.query("COMMIT");
+    return res.status(201).json({ success: true });
+  } catch (err) {
+    await client.query("ROLLBACK");
+    console.error(err);
+    if (err.code === "23505") {
+      return res.status(400).json({ message: "Skill name already exists" });
+    }
+    return res.status(500).json({ message: "Server error" });
+  } finally {
+    client.release();
+  }
+});
+
+router.delete("/delete-skill", async (req, res) => {
+  const { auth } = req.cookies;
+  if (!auth) return res.status(401).json({ message: "Not authenticated" });
+
+  let session;
+  try {
+    session = JSON.parse(auth);
+  } catch {
+    return res.status(400).json({ message: "Invalid session data" });
+  }
+
+  const organisationId = session.organisation?.id;
+  const isAdmin = session.organisation?.role === "admin";
+  if (!isAdmin) {
+    return res.status(403).json({ message: "Forbidden" });
+  }
+  if (!organisationId) {
+    return res.status(400).json({ message: "Organization required" });
+  }
+  const { skillId } = req.body;
+  if (!skillId) {
+    return res.status(400).json({ message: "skillId is required" });
+  }
+
+  const client = await pool.connect();
+  try {
+    await client.query("BEGIN");
+    await client.query(
+      `DELETE FROM skills WHERE id = $1 AND organisation_id = $2`,
+      [skillId, organisationId]
+    );
     await client.query("COMMIT");
     return res.status(200).json({ success: true });
   } catch (err) {
