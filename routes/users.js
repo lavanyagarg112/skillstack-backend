@@ -676,6 +676,7 @@ router.delete("/preferences/channels", async (req, res) => {
   }
 
   const userId = session.userId;
+  const organisationId = session.organisation?.id;
   const { channel_id } = req.body;
 
   if (!channel_id) {
@@ -726,6 +727,7 @@ router.delete("/preferences/levels", async (req, res) => {
 
   const userId = session.userId;
   const { level_id } = req.body;
+  const organisationId = session.organisation?.id;
 
   if (!level_id) {
     return res.status(400).json({ message: "Level ID is required" });

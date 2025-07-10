@@ -1133,6 +1133,7 @@ router.post("/enroll-course", async (req, res) => {
   }
 
   const userId = session.userId;
+  const organisationId = session.organisation?.id;
   const { courseId } = req.body;
   if (!courseId) {
     return res.status(400).json({ message: "courseId is required" });
@@ -1206,6 +1207,7 @@ router.post("/unenroll-course", async (req, res) => {
   }
 
   const userId = session.userId;
+  const organisationId = session.organisation?.id;
   const { courseId } = req.body;
   if (!courseId) {
     return res.status(400).json({ message: "courseId is required" });
@@ -1279,6 +1281,7 @@ router.post("/complete-course", async (req, res) => {
 
   const userId = session.userId;
   const { courseId } = req.body;
+  const organisationId = session.organisation?.id;
   if (!courseId) {
     return res.status(400).json({ message: "courseId is required" });
   }
@@ -1346,6 +1349,7 @@ router.post("/uncomplete-course", async (req, res) => {
   }
 
   const userId = session.userId;
+  const organisationId = session.organisation?.id;
   const { courseId } = req.body;
   if (!courseId) {
     return res.status(400).json({ message: "courseId is required" });
@@ -1781,6 +1785,7 @@ router.post("/mark-module-started", async (req, res) => {
 
   const userId = session.userId;
   const moduleId = req.body.moduleId;
+  const organisationId = session.organisation?.id;
   if (!moduleId) {
     return res.status(400).json({ message: "moduleId is required" });
   }
@@ -1848,6 +1853,7 @@ router.post("/mark-module-completed", async (req, res) => {
 
   const userId = session.userId;
   const moduleId = req.body.moduleId;
+  const organisationId = session.organisation?.id;
   if (!moduleId) {
     return res.status(400).json({ message: "moduleId is required" });
   }
