@@ -9,7 +9,7 @@ async function logActivity({
 }) {
   const sql = `
     INSERT INTO activity_logs
-      (user_id, organisation_id, action, metadata, displayMetadata)
+      (user_id, organisation_id, action, metadata, display_metadata)
     VALUES ($1, $2, $3, $4, $5)
   `;
   await pool.query(sql, [
