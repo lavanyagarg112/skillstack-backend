@@ -104,6 +104,18 @@ router.post("/questions", async (req, res) => {
       [question_text, position, organisationId]
     );
 
+    // commit
+    if (result.rows.length === 0) {
+      return res.status(500).json({ message: "Failed to create question" });
+    }
+
+    await logActivity({
+      userId: user.userId,
+      organisationId,
+      action: "add_onboarding_question",
+      metadata: { questionId: result.rows[0].id },
+    });
+
     res.status(201).json({ question: result.rows[0] });
   } catch (err) {
     console.error(err);
@@ -205,6 +217,16 @@ router.post("/questions/:id/options", async (req, res) => {
       level_sort_order: level_id ? levelCheck.rows[0].sort_order : null,
     };
 
+    await logActivity({
+      userId: user.userId,
+      organisationId: user.organisation.id,
+      action: "add_onboarding_option",
+      metadata: {
+        questionId: id,
+        optionId: result.rows[0].id,
+      },
+    });
+
     res.status(201).json({ option });
   } catch (err) {
     await client.query("ROLLBACK");
@@ -254,6 +276,13 @@ router.delete("/questions/:id", async (req, res) => {
     if (result.rows.length === 0) {
       return res.status(404).json({ message: "Question not found" });
     }
+
+    await logActivity({
+      userId: user.userId,
+      organisationId,
+      action: "delete_onboarding_question",
+      metadata: { questionId: result.rows[0].id },
+    });
 
     res.json({ message: "Question deleted successfully" });
   } catch (err) {
@@ -315,6 +344,13 @@ router.delete("/options/:optionId", async (req, res) => {
       "DELETE FROM onboarding_question_options WHERE id = $1 RETURNING id",
       [optionId]
     );
+
+    await logActivity({
+      userId: user.userId,
+      organisationId,
+      action: "delete_onboarding_option",
+      metadata: { optionId: result.rows[0].id },
+    });
 
     res.json({ message: "Option deleted successfully" });
   } catch (err) {
@@ -453,6 +489,13 @@ router.post("/responses", async (req, res) => {
     }
 
     await client.query("COMMIT");
+
+    await logActivity({
+      userId: user.userId,
+      organisationId: user.organisation.id,
+      action: "submit_onboarding_responses",
+      metadata: { optionIds: option_ids },
+    });
 
     res.json({
       message: "Responses submitted successfully",
