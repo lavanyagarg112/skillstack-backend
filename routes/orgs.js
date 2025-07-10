@@ -2,6 +2,7 @@ const express = require("express");
 const pool = require("../database/db");
 const router = express.Router();
 const crypto = require("crypto");
+const logActivity = require("./activityLogger");
 
 function setAuthCookie(res, payload) {
   res.cookie("auth", JSON.stringify(payload), {
@@ -49,6 +50,12 @@ router.post("/", async (req, res) => {
     );
 
     await client.query("COMMIT");
+    await logActivity({
+      userId,
+      organisationId: org.id,
+      action: "create_organisation",
+      metadata: { organisationId: org.id },
+    });
     return res.status(201).json({ organisation: { ...org, role: "admin" } });
   } catch (err) {
     await client.query("ROLLBACK");
@@ -116,6 +123,12 @@ router.post("/addemployee", async (req, res) => {
         organisationname: org.organisation_name,
         role: "employee",
       },
+    });
+    await logActivity({
+      userId,
+      organisationId,
+      action: "add_employee",
+      metadata: { organisationId },
     });
 
     return res.status(201).json({ organisation: { ...org, role: "employee" } });
@@ -265,6 +278,17 @@ router.post("/settings", async (req, res) => {
       organisation: neworganisation,
     });
 
+    await logActivity({
+      userId,
+      organisationId: organisation_id,
+      action: "update_organisation_settings",
+      metadata: {
+        organisationId: organisation_id,
+        ai_enabled,
+        description,
+      },
+    });
+
     return res.json({ organisation: updateRes.rows[0] });
   } catch (err) {
     await client.query("ROLLBACK");
@@ -316,6 +340,12 @@ router.get("/generate-invite-code", async (req, res) => {
     }
 
     await client.query("COMMIT");
+    await logActivity({
+      userId,
+      organisationId,
+      action: "generate_invite_code",
+      metadata: { organisationId, inviteCode },
+    });
     return res.json({ inviteCode: updateRes.rows[0].current_invitation_id });
   } catch (err) {
     await client.query("ROLLBACK");
