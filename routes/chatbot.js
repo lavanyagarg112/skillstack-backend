@@ -23,7 +23,8 @@ async function callLLM(context) {
     Do not mention "Since we are in this particular course", just answer the question directly.
     Answer the question as if you are directly talking to the student.
     If unsure, give your best expert guess based on course/module metadata and tags. Keep your answers concise and focused on the question.
-    If the question is not related to the course/module, politely redirect them to the appropriate support
+    If the question is not related to the course/module, politely redirect them to the appropriate support. Do not answer anything unrelated to the
+    course material at all.
   `;
 
   const messages = [
