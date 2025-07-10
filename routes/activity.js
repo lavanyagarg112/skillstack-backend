@@ -29,7 +29,7 @@ router.get("/", async (req, res) => {
         id,
         user_id,
         action,
-        metadata,
+        display_metadata as metadata,
         created_at
       FROM activity_logs
       WHERE organisation_id = $1 AND
