@@ -171,7 +171,7 @@ router.post("/ask", async (req, res) => {
   }
 });
 
-router.get("/logs", async (req, res) => {
+router.post("/logs", async (req, res) => {
   const { auth } = req.cookies;
   if (!auth) return res.status(401).json({ message: "Not authenticated" });
   let user;
@@ -189,14 +189,22 @@ router.get("/logs", async (req, res) => {
   if (!organisationId) {
     return res.status(403).json({ message: "Forbidden" });
   }
+
+  const { courseId, moduleId } = req.body;
+  if (!courseId || !moduleId) {
+    return res
+      .status(400)
+      .json({ message: "Course and module IDs are required" });
+  }
   try {
     const client = await pool.connect();
     const logs = await client.query(
       `SELECT question, answer
                FROM chat_logs
                WHERE user_id = $1 AND organisation_id = $2
+                AND course_id = $3 AND module_id = $4
                ORDER BY created_at DESC`,
-      [userId, organisationId]
+      [userId, organisationId, courseId, moduleId]
     );
     await client.release();
     return res.json({ success: true, logs: logs.rows });
