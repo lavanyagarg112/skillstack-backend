@@ -328,7 +328,8 @@ CREATE TABLE activity_logs (
   organisation_id INTEGER REFERENCES organisations(id) ON DELETE SET NULL,
   action        VARCHAR(50) NOT NULL,
   metadata      JSONB        DEFAULT '{}'    NOT NULL,
-  created_at    TIMESTAMPTZ   NOT NULL DEFAULT now()
+  created_at    TIMESTAMPTZ   NOT NULL DEFAULT now(),
+  display_metadata JSONB NOT NULL DEFAULT '{}'
 );
 
 
