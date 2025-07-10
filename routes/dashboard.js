@@ -14,103 +14,109 @@ function getAuthUser(req) {
 
 router.get("/user-dashboard", async (req, res) => {
   const user = getAuthUser(req);
-  if (!user || !user.isLoggedIn)
+  if (!user || !user.isLoggedIn) {
     return res.status(401).json({ message: "Not logged in" });
+  }
 
   const client = await pool.connect();
   try {
     await client.query("BEGIN");
     const userId = user.userId;
 
-    const { rows: currCourse } = await client.query(
+    const { rows: currCourseArr } = await client.query(
       `SELECT c.id, c.name
          FROM enrollments e
-    JOIN courses c ON c.id = e.course_id
+         JOIN courses c ON c.id = e.course_id
         WHERE e.user_id = $1
-          AND e.status = 'enrolled'
-        ORDER BY e.started_at DESC
+          AND e.status IN ('enrolled', 'in_progress')
+        ORDER BY e.started_at DESC NULLS LAST
         LIMIT 1`,
       [userId]
     );
+    const currentCourse = currCourseArr[0] || null;
 
-    let currModule = null;
-    if (currCourse.length) {
-      const courseId = currCourse[0].id;
-      const { rows } = await client.query(
+    let currentModule = null;
+    if (currentCourse) {
+      const { rows: moduleArr } = await client.query(
         `SELECT m.id, m.title
-           FROM module_status ms
-     JOIN modules m ON m.id = ms.module_id
+           FROM modules m
+           JOIN module_status ms ON ms.module_id = m.id
           WHERE ms.enrollment_id = (
                   SELECT id FROM enrollments
-                   WHERE user_id  = $1
-                     AND course_id = $2
-               )
+                  WHERE user_id = $1 AND course_id = $2
+                  LIMIT 1
+                )
             AND ms.status = 'in_progress'
-          ORDER BY ms.started_at DESC
+          ORDER BY ms.started_at DESC NULLS LAST
           LIMIT 1`,
-        [userId, courseId]
+        [userId, currentCourse.id]
       );
-      currModule = rows[0] || null;
+      currentModule = moduleArr[0] || null;
     }
 
-    const { rows: rm } = await client.query(
-      `SELECT id FROM roadmaps
-        WHERE user_id = $1
-        ORDER BY id DESC
-        LIMIT 1`,
-      [userId]
-    );
-    let roadmapProgress = { completed: 0, total: 0 };
-    if (rm.length) {
-      const roadmapId = rm[0].id;
-      const { rows } = await client.query(
-        `SELECT 
-           COUNT(*) FILTER(WHERE ri.module_id IS NOT NULL)       AS total,
-           COUNT(*) FILTER(WHERE ms.status = 'completed')             AS completed
-         FROM roadmap_items ri
-    LEFT JOIN module_status ms
-           ON ms.module_id = ri.module_id
-          AND ms.enrollment_id = (
-               SELECT id FROM enrollments
-                WHERE user_id = $1
-                  AND course_id = (
-                    SELECT course_id FROM modules WHERE id = ri.module_id
-                  )
-             )
-        WHERE ri.roadmap_id = $2`,
-        [userId, roadmapId]
+    let nextToLearn = [];
+    if (currentCourse) {
+      const { rows: learnArr } = await client.query(
+        `SELECT m.id, m.title
+           FROM modules m
+           LEFT JOIN module_status ms
+             ON ms.module_id = m.id
+            AND ms.enrollment_id = (
+              SELECT id FROM enrollments WHERE user_id = $1 AND course_id = $2 LIMIT 1
+            )
+          WHERE m.course_id = $2
+            AND (ms.status IS NULL OR ms.status = 'not_started')
+          ORDER BY m.position ASC
+          LIMIT 2`,
+        [userId, currentCourse.id]
       );
-      roadmapProgress = rows[0];
+      nextToLearn = learnArr;
     }
 
-    let courseProgress = { completed: 0, total: 0 };
-    if (currCourse.length) {
-      const courseId = currCourse[0].id;
+    let toRevise = [];
+    if (currentCourse) {
+      const { rows: reviseArr } = await client.query(
+        `SELECT m.id, m.title
+           FROM modules m
+           JOIN module_status ms
+             ON ms.module_id = m.id
+            AND ms.enrollment_id = (
+              SELECT id FROM enrollments WHERE user_id = $1 AND course_id = $2 LIMIT 1
+            )
+          WHERE ms.status = 'completed'
+          ORDER BY ms.completed_at DESC NULLS LAST
+          LIMIT 1`,
+        [userId, currentCourse.id]
+      );
+      toRevise = reviseArr;
+    }
+
+    let summaryStats = { completedModules: 0, totalModules: 0 };
+    if (currentCourse) {
       const { rows } = await client.query(
         `SELECT
-           COUNT(m.id)                             AS total,
-           COUNT(ms.id) FILTER(ms.status = 'completed') AS completed
-         FROM modules m
-    LEFT JOIN module_status ms
-           ON ms.module_id     = m.id
-          AND ms.enrollment_id = (
-               SELECT id FROM enrollments
-                WHERE user_id  = $1
-                  AND course_id = $2
-             )
-        WHERE m.course_id = $2`,
-        [userId, currCourse[0].id]
+            COUNT(m.id) AS "totalModules",
+            COUNT(ms.id) FILTER (WHERE ms.status = 'completed') AS "completedModules"
+           FROM modules m
+      LEFT JOIN module_status ms
+             ON ms.module_id = m.id
+            AND ms.enrollment_id = (
+              SELECT id FROM enrollments WHERE user_id = $1 AND course_id = $2 LIMIT 1
+            )
+          WHERE m.course_id = $2`,
+        [userId, currentCourse.id]
       );
-      courseProgress = rows[0];
+      summaryStats = rows[0];
     }
 
     await client.query("COMMIT");
     res.json({
       welcome: `Welcome, ${user.firstname}!`,
-      currentCourse: currCourse[0] || null,
-      currentModule: currModule,
-      roadmapProgress,
-      courseProgress,
+      currentCourse,
+      currentModule,
+      nextToLearn,
+      toRevise,
+      summaryStats,
     });
   } catch (err) {
     await client.query("ROLLBACK");
