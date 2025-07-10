@@ -322,5 +322,15 @@ CREATE TABLE user_levels (
   UNIQUE(user_id, level_id)
 );
 
+CREATE TABLE activity_logs (
+  id            SERIAL PRIMARY KEY,
+  user_id       INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  organisation_id INTEGER REFERENCES organisations(id) ON DELETE SET NULL,
+  action        VARCHAR(50) NOT NULL,
+  metadata      JSONB        DEFAULT '{}'    NOT NULL,
+  created_at    TIMESTAMPTZ   NOT NULL DEFAULT now()
+);
+
+
 
 COMMIT;
