@@ -57,6 +57,12 @@ router.post("/ask", async (req, res) => {
     return res.status(401).json({ message: "Not logged in" });
   }
 
+  const userId = user.userId;
+  const organisationId = user.organisation?.id;
+  if (!organisationId) {
+    return res.status(403).json({ message: "Forbidden" });
+  }
+
   const { courseId, moduleId, question } = req.body;
   if (!courseId || !moduleId) {
     return res
@@ -67,65 +73,63 @@ router.post("/ask", async (req, res) => {
     return res.status(400).json({ message: "Question is required" });
   }
 
-  const client = await pool.connect();
-  const courseRes = await client.query(
-    `SELECT name, description
+  try {
+    const client = await pool.connect();
+    const courseRes = await client.query(
+      `SELECT name, description
          FROM courses
          WHERE id = $1`,
-    [courseId]
-  );
-  const course = courseRes.rows[0];
-  const moduleRes = await client.query(
-    `SELECT title, description
+      [courseId]
+    );
+    const course = courseRes.rows[0];
+    const moduleRes = await client.query(
+      `SELECT title, description
          FROM modules
          WHERE id = $1`,
-    [moduleId]
-  );
-  const module = moduleRes.rows[0];
+      [moduleId]
+    );
+    const module = moduleRes.rows[0];
 
-  const courseSkillsRes = await client.query(
-    `SELECT s.id, s.name, s.description
+    const courseSkillsRes = await client.query(
+      `SELECT s.id, s.name, s.description
          FROM module_skills ms
          JOIN skills s ON s.id = ms.skill_id
          WHERE ms.module_id = $1`,
-    [moduleId]
-  );
-  const courseSkills =
-    courseSkillsRes.rows.map((skill) => ({
-      id: skill.id,
-      name: skill.name,
-      description: skill.description,
-    })) || [];
-  const channelRes = await client.query(
-    `SELECT c.id, c.name, c.description
+      [moduleId]
+    );
+    const courseSkills =
+      courseSkillsRes.rows.map((skill) => ({
+        id: skill.id,
+        name: skill.name,
+        description: skill.description,
+      })) || [];
+    const channelRes = await client.query(
+      `SELECT c.id, c.name, c.description
          FROM course_channels cc
          JOIN channels c ON c.id = cc.channel_id
          WHERE cc.course_id = $1`,
-    [courseId]
-  );
-  const channel = channelRes.rows[0] || {
-    id: null,
-    name: "No channel",
-    description: "",
-  };
+      [courseId]
+    );
+    const channel = channelRes.rows[0] || {
+      id: null,
+      name: "No channel",
+      description: "",
+    };
 
-  const levelRes = await client.query(
-    `SELECT l.id, l.name, l.description, l.sort_order
+    const levelRes = await client.query(
+      `SELECT l.id, l.name, l.description, l.sort_order
          FROM course_channels cc
          JOIN levels l ON l.id = cc.level_id
          WHERE cc.course_id = $1`,
-    [courseId]
-  );
-  const level = levelRes.rows[0] || {
-    id: null,
-    name: "No level",
-    description: "",
-    sort_order: 0,
-  };
+      [courseId]
+    );
+    const level = levelRes.rows[0] || {
+      id: null,
+      name: "No level",
+      description: "",
+      sort_order: 0,
+    };
 
-  await client.release();
-
-  try {
     const context = {
       course_name: course.name,
       course_description: course.description,
@@ -151,6 +155,14 @@ router.post("/ask", async (req, res) => {
     };
 
     const answer = await callLLM(context);
+
+    await client.query(
+      `INSERT INTO chat_logs (user_id, organisation_id, course_id, module_id, question, answer)
+         VALUES ($1, $2, $3, $4, $5, $6)`,
+      [userId, organisationId, courseId, moduleId, question, answer]
+    );
+
+    await client.release();
 
     return res.json({ success: true, answer });
   } catch (err) {
