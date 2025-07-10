@@ -102,6 +102,7 @@ router.get("/user-dashboard", async (req, res) => {
     }
 
     let summaryStats = { completedModules: 0, totalModules: 0 };
+    let globalStats = { completedModules: 0, totalModules: 0 };
     if (currentCourse) {
       const { rows } = await client.query(
         `SELECT
@@ -119,6 +120,19 @@ router.get("/user-dashboard", async (req, res) => {
       summaryStats = rows[0];
     }
 
+    const { rows: globalRows } = await client.query(
+      `SELECT
+        COUNT(m.id) AS "totalModules",
+        COUNT(ms.id) FILTER (WHERE ms.status = 'completed') AS "completedModules"
+      FROM enrollments e
+JOIN modules m ON m.course_id = e.course_id
+LEFT JOIN module_status ms
+  ON ms.module_id = m.id AND ms.enrollment_id = e.id
+WHERE e.user_id = $1`,
+      [userId]
+    );
+    globalStats = globalRows[0];
+
     await client.query("COMMIT");
     res.json({
       welcome: `Welcome, ${user.firstname}!`,
@@ -127,6 +141,7 @@ router.get("/user-dashboard", async (req, res) => {
       nextToLearn,
       toRevise,
       summaryStats,
+      globalStats,
     });
   } catch (err) {
     await client.query("ROLLBACK");
