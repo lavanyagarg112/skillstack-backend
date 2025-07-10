@@ -87,6 +87,7 @@ router.post("/login", async (req, res) => {
       organisationId: organisation ? organisation.id : null,
       action: "login",
       metadata: { email },
+      displayMetadata: { email },
     });
     return res.json({ success: true });
   } catch (err) {

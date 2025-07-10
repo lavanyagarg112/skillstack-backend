@@ -71,6 +71,7 @@ router.post("/", async (req, res) => {
       organisationId,
       action: "create_course",
       metadata: { courseId },
+      displayMetadata: { "course name": courseName },
     });
     return res.status(201).json({ success: true });
   } catch (err) {
@@ -238,6 +239,18 @@ router.delete("/", async (req, res) => {
   try {
     await client.query("BEGIN");
 
+    const courseRes = await client.query(
+      `SELECT c.id, c.name FROM courses c
+      WHERE c.id = $1`,
+      [courseId]
+    );
+    if (!courseRes.rows.length) {
+      console.error("Course not found for ID:", courseId);
+      return res.status(404).json({ message: "Course not found" });
+    }
+
+    const courseName = courseRes.rows[0].name;
+
     const _ = await client.query(
       `DELETE FROM courses c
       WHERE c.id = $1`,
@@ -250,6 +263,7 @@ router.delete("/", async (req, res) => {
       organisationId: session.organisation.id,
       action: "delete_course",
       metadata: { courseId },
+      displayMetadata: { "course name": courseName },
     });
     return res.status(201).json({ success: true });
   } catch (err) {
@@ -325,6 +339,7 @@ router.put("/", async (req, res) => {
       organisationId: session.organisation.id,
       action: "edit_course",
       metadata: { courseId },
+      displayMetadata: { "course name": courseName },
     });
     return res.status(201).json({ success: true });
   } catch (err) {
@@ -537,6 +552,7 @@ router.post("/add-module", upload.single("file"), async (req, res) => {
       organisationId: session.organisation.id,
       action: "add_module",
       metadata: { moduleId },
+      displayMetadata: { "module name": name },
     });
     return res.status(201).json({
       module_id,
@@ -574,6 +590,15 @@ router.delete("/delete-module", async (req, res) => {
   try {
     await client.query("BEGIN");
 
+    const moduleRes = await client.query(
+      `SELECT id, title FROM modules WHERE id = $1`,
+      [moduleId]
+    );
+    if (!moduleRes.rows.length) {
+      return res.status(404).json({ message: "Module not found" });
+    }
+    const moduleTitle = moduleRes.rows[0].title;
+
     const _ = await client.query(`DELETE FROM modules WHERE id = $1`, [
       moduleId,
     ]);
@@ -584,6 +609,7 @@ router.delete("/delete-module", async (req, res) => {
       organisationId: session.organisation.id,
       action: "delete_module",
       metadata: { moduleId },
+      displayMetadata: { "module title": moduleTitle },
     });
     return res.status(201).json({ success: true });
   } catch (err) {
@@ -959,6 +985,7 @@ router.put("/update-module", upload.single("file"), async (req, res) => {
       organisationId: session.organisation.id,
       action: "edit_module",
       metadata: { moduleId },
+      displayMetadata: { "module name": name },
     });
     return res.status(200).json({ success: true });
   } catch (err) {
@@ -1152,6 +1179,16 @@ router.post("/enroll-course", async (req, res) => {
 
     const enrollmentId = insertRes.rows[0].id;
 
+    const courseRes = await client.query(
+      `SELECT id, name FROM courses WHERE id = $1`,
+      [courseId]
+    );
+    if (!courseRes.rows.length) {
+      await client.query("ROLLBACK");
+      return res.status(404).json({ message: "Course not found" });
+    }
+    const courseName = courseRes.rows[0].name;
+
     const modulesRes = await client.query(
       `SELECT id
          FROM modules
@@ -1175,6 +1212,7 @@ router.post("/enroll-course", async (req, res) => {
       organisationId,
       action: "enroll_course",
       metadata: { courseId },
+      displayMetadata: { "course name": courseName },
     });
     return res.status(201).json({
       success: true,
@@ -1217,6 +1255,16 @@ router.post("/unenroll-course", async (req, res) => {
   try {
     await client.query("BEGIN");
 
+    const courseRes = await client.query(
+      `SELECT id, name FROM courses WHERE id = $1`,
+      [courseId]
+    );
+    if (!courseRes.rows.length) {
+      await client.query("ROLLBACK");
+      return res.status(404).json({ message: "Course not found" });
+    }
+    const courseName = courseRes.rows[0].name;
+
     const delRes = await client.query(
       `DELETE FROM enrollments
          WHERE user_id = $1
@@ -1257,6 +1305,7 @@ router.post("/unenroll-course", async (req, res) => {
       organisationId,
       action: "unenroll_course",
       metadata: { courseId },
+      displayMetadata: { "course name": courseName },
     });
     return res.status(200).json({ success: true });
   } catch (err) {
@@ -1302,6 +1351,16 @@ router.post("/complete-course", async (req, res) => {
       [courseId, userId]
     );
 
+    const courseRes = await client.query(
+      `SELECT id, name FROM courses WHERE id = $1`,
+      [courseId]
+    );
+    if (!courseRes.rows.length) {
+      await client.query("ROLLBACK");
+      return res.status(404).json({ message: "Course not found" });
+    }
+    const courseName = courseRes.rows[0].name;
+
     const totalModules = modRes.rows[0].total_modules;
     const completedModules = modRes.rows[0].completed_modules;
     if (totalModules !== completedModules) {
@@ -1326,6 +1385,7 @@ router.post("/complete-course", async (req, res) => {
       organisationId,
       action: "complete_course",
       metadata: { courseId },
+      displayMetadata: { "course name": courseName },
     });
     return res.status(200).json({ success: true });
   } catch (err) {
@@ -1359,6 +1419,16 @@ router.post("/uncomplete-course", async (req, res) => {
   try {
     await client.query("BEGIN");
 
+    const courseRes = await client.query(
+      `SELECT id, name FROM courses WHERE id = $1`,
+      [courseId]
+    );
+    if (!courseRes.rows.length) {
+      await client.query("ROLLBACK");
+      return res.status(404).json({ message: "Course not found" });
+    }
+    const courseName = courseRes.rows[0].name;
+
     await client.query(
       `UPDATE enrollments
          SET status = 'enrolled',
@@ -1374,6 +1444,7 @@ router.post("/uncomplete-course", async (req, res) => {
       organisationId,
       action: "uncomplete_course",
       metadata: { courseId },
+      displayMetadata: { "course name": courseName },
     });
     return res.status(200).json({ success: true });
   } catch (err) {
@@ -1809,6 +1880,16 @@ router.post("/mark-module-started", async (req, res) => {
 
     const enrollmentId = enrolmentRes.rows[0]?.id;
 
+    const moduleRes = await client.query(
+      `SELECT id, title FROM modules WHERE id = $1 AND course_id = $2`,
+      [moduleId, courseId]
+    );
+    if (!moduleRes.rows.length) {
+      await client.query("ROLLBACK");
+      return res.status(404).json({ message: "Module not found" });
+    }
+    const moduleTitle = moduleRes.rows[0].title;
+
     const statusRes = await client.query(
       `SELECT status FROM module_status
          WHERE enrollment_id = $1 AND module_id = $2`,
@@ -1829,6 +1910,7 @@ router.post("/mark-module-started", async (req, res) => {
       organisationId,
       action: "start_module",
       metadata: { moduleId },
+      displayMetadata: { "module title": moduleTitle },
     });
     return res.status(200).json({ status: "in_progress" });
   } catch (err) {
@@ -1877,6 +1959,16 @@ router.post("/mark-module-completed", async (req, res) => {
 
     const enrollmentId = enrolmentRes.rows[0]?.id;
 
+    const moduleRes = await client.query(
+      `SELECT id, title FROM modules WHERE id = $1 AND course_id = $2`,
+      [moduleId, courseId]
+    );
+    if (!moduleRes.rows.length) {
+      await client.query("ROLLBACK");
+      return res.status(404).json({ message: "Module not found" });
+    }
+    const moduleTitle = moduleRes.rows[0].title;
+
     const statusRes = await client.query(
       `SELECT status FROM module_status
          WHERE enrollment_id = $1 AND module_id = $2`,
@@ -1904,6 +1996,7 @@ router.post("/mark-module-completed", async (req, res) => {
       organisationId,
       action: "complete_module",
       metadata: { moduleId },
+      displayMetadata: { "module title": moduleTitle },
     });
     return res.status(200).json({ status: "in_progress" });
   } catch (err) {
@@ -1986,6 +2079,7 @@ router.post("/add-channel", async (req, res) => {
       organisationId,
       action: "add_channel",
       metadata: { channelId: channel.id, name: channel.name },
+      displayMetadata: { "channel name": name },
     });
     return res.status(201).json({ success: true });
   } catch (err) {
@@ -2027,6 +2121,15 @@ router.delete("/delete-channel", async (req, res) => {
   const client = await pool.connect();
   try {
     await client.query("BEGIN");
+    const channelRes = await client.query(
+      `SELECT id, name FROM channels WHERE id = $1 AND organisation_id = $2`,
+      [channelId, organisationId]
+    );
+    if (!channelRes.rows.length) {
+      await client.query("ROLLBACK");
+      return res.status(404).json({ message: "Channel not found" });
+    }
+    const channelName = channelRes.rows[0].name;
     await client.query(
       `DELETE FROM channels WHERE id = $1 AND organisation_id = $2`,
       [channelId, organisationId]
@@ -2037,6 +2140,7 @@ router.delete("/delete-channel", async (req, res) => {
       organisationId,
       action: "delete_channel",
       metadata: { channelId },
+      displayMetadata: { "channel name": channelName },
     });
     return res.status(200).json({ success: true });
   } catch (err) {
@@ -2123,6 +2227,7 @@ router.post("/add-level", async (req, res) => {
         name: level.name,
         sortOrder: level.sort_order,
       },
+      displayMetadata: { "level name": name },
     });
     return res.status(201).json({ success: true });
   } catch (err) {
@@ -2164,6 +2269,15 @@ router.delete("/delete-level", async (req, res) => {
   const client = await pool.connect();
   try {
     await client.query("BEGIN");
+    const levelRes = await client.query(
+      `SELECT id, name FROM levels WHERE id = $1 AND organisation_id = $2`,
+      [levelId, organisationId]
+    );
+    if (!levelRes.rows.length) {
+      await client.query("ROLLBACK");
+      return res.status(404).json({ message: "Level not found" });
+    }
+    const levelName = levelRes.rows[0].name;
     await client.query(
       `DELETE FROM levels WHERE id = $1 AND organisation_id = $2`,
       [levelId, organisationId]
@@ -2174,6 +2288,7 @@ router.delete("/delete-level", async (req, res) => {
       organisationId,
       action: "delete_level",
       metadata: { levelId },
+      displayMetadata: { "level name": levelName },
     });
     return res.status(200).json({ success: true });
   } catch (err) {
@@ -2256,6 +2371,7 @@ router.post("/add-skill", async (req, res) => {
       organisationId,
       action: "add_skill",
       metadata: { skillId: skill.id, name: skill.name },
+      displayMetadata: { "skill name": name },
     });
     return res.status(201).json({ success: true });
   } catch (err) {
@@ -2297,6 +2413,15 @@ router.delete("/delete-skill", async (req, res) => {
   const client = await pool.connect();
   try {
     await client.query("BEGIN");
+    const skillRes = await client.query(
+      `SELECT id, name FROM skills WHERE id = $1 AND organisation_id = $2`,
+      [skillId, organisationId]
+    );
+    if (!skillRes.rows.length) {
+      await client.query("ROLLBACK");
+      return res.status(404).json({ message: "Skill not found" });
+    }
+    const skillName = skillRes.rows[0].name;
     await client.query(
       `DELETE FROM skills WHERE id = $1 AND organisation_id = $2`,
       [skillId, organisationId]
@@ -2307,6 +2432,7 @@ router.delete("/delete-skill", async (req, res) => {
       organisationId,
       action: "delete_skill",
       metadata: { skillId },
+      displayMetadata: { "skill name": skillName },
     });
     return res.status(200).json({ success: true });
   } catch (err) {
