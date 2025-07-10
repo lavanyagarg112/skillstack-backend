@@ -24,13 +24,23 @@ router.get("/user-dashboard", async (req, res) => {
     const userId = user.userId;
 
     const { rows: currCourseArr } = await client.query(
-      `SELECT c.id, c.name
-         FROM enrollments e
-         JOIN courses c ON c.id = e.course_id
-        WHERE e.user_id = $1
-          AND e.status IN ('enrolled', 'in_progress')
-        ORDER BY e.started_at DESC NULLS LAST
-        LIMIT 1`,
+      `
+  SELECT c.id, c.name
+    FROM enrollments e
+    JOIN courses c ON c.id = e.course_id
+   WHERE e.user_id = $1
+     AND e.status IN ('enrolled', 'in_progress')
+     AND EXISTS (
+       SELECT 1 FROM modules m
+         LEFT JOIN module_status ms
+           ON ms.module_id = m.id
+          AND ms.enrollment_id = e.id
+        WHERE m.course_id = c.id
+          AND (ms.status IS NULL OR ms.status != 'completed')
+     )
+   ORDER BY e.started_at DESC NULLS LAST
+   LIMIT 1
+  `,
       [userId]
     );
     const currentCourse = currCourseArr[0] || null;
