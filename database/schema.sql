@@ -332,6 +332,16 @@ CREATE TABLE activity_logs (
   display_metadata JSONB NOT NULL DEFAULT '{}'
 );
 
+CREATE TABLE chat_logs (
+  id            SERIAL PRIMARY KEY,
+  user_id       INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  organisation_id INTEGER REFERENCES organisations(id) ON DELETE SET NULL,
+  course_id    INTEGER REFERENCES courses(id) ON DELETE SET NULL,
+  module_id    INTEGER REFERENCES modules(id) ON DELETE SET NULL,
+  question      TEXT NOT NULL,
+  answer        TEXT NOT NULL,
+  created_at    TIMESTAMPTZ NOT NULL DEFAULT now()
+);
 
 
 COMMIT;
