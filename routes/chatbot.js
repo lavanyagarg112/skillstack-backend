@@ -229,7 +229,7 @@ router.get("/history", async (req, res) => {
   try {
     const client = await pool.connect();
     const logs = await client.query(
-      `SELECT cl.id, c.name, m.title, cl.question, cl.answer, cl.created_at
+      `SELECT cl.id, c.id as course_id, c.name, m.id as module_id, m.title, cl.question, cl.answer, cl.created_at
          FROM chat_logs cl, courses c, modules m
          WHERE cl.course_id = c.id and cl.module_id = m.id AND
          cl.user_id = $1 AND cl.organisation_id = $2
