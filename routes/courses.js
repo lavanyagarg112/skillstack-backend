@@ -3,6 +3,7 @@ const pool = require("../database/db");
 const router = express.Router();
 const multer = require("multer");
 const path = require("path");
+const logActivity = require("./activityLogger");
 
 const storage = multer.diskStorage({
   destination: "uploads/",
@@ -65,6 +66,13 @@ router.post("/", async (req, res) => {
     );
 
     await client.query("COMMIT");
+    await logActivity({
+      userId,
+      organisationId,
+      action: "create_course",
+      metadata: { courseId },
+      displayMetadata: { "course name": courseName },
+    });
     return res.status(201).json({ success: true });
   } catch (err) {
     await client.query("ROLLBACK");
@@ -231,6 +239,18 @@ router.delete("/", async (req, res) => {
   try {
     await client.query("BEGIN");
 
+    const courseRes = await client.query(
+      `SELECT c.id, c.name FROM courses c
+      WHERE c.id = $1`,
+      [courseId]
+    );
+    if (!courseRes.rows.length) {
+      console.error("Course not found for ID:", courseId);
+      return res.status(404).json({ message: "Course not found" });
+    }
+
+    const courseName = courseRes.rows[0].name;
+
     const _ = await client.query(
       `DELETE FROM courses c
       WHERE c.id = $1`,
@@ -238,6 +258,13 @@ router.delete("/", async (req, res) => {
     );
 
     await client.query("COMMIT");
+    await logActivity({
+      userId: session.userId,
+      organisationId: session.organisation.id,
+      action: "delete_course",
+      metadata: { courseId },
+      displayMetadata: { "course name": courseName },
+    });
     return res.status(201).json({ success: true });
   } catch (err) {
     await client.query("ROLLBACK");
@@ -307,6 +334,13 @@ router.put("/", async (req, res) => {
     }
 
     await client.query("COMMIT");
+    await logActivity({
+      userId: session.userId,
+      organisationId: session.organisation.id,
+      action: "edit_course",
+      metadata: { courseId },
+      displayMetadata: { "course name": courseName },
+    });
     return res.status(201).json({ success: true });
   } catch (err) {
     await client.query("ROLLBACK");
@@ -513,6 +547,13 @@ router.post("/add-module", upload.single("file"), async (req, res) => {
     }
 
     await client.query("COMMIT");
+    await logActivity({
+      userId: session.userId,
+      organisationId: session.organisation.id,
+      action: "add_module",
+      metadata: { moduleId },
+      displayMetadata: { "module name": name },
+    });
     return res.status(201).json({
       module_id,
     });
@@ -549,11 +590,27 @@ router.delete("/delete-module", async (req, res) => {
   try {
     await client.query("BEGIN");
 
+    const moduleRes = await client.query(
+      `SELECT id, title FROM modules WHERE id = $1`,
+      [moduleId]
+    );
+    if (!moduleRes.rows.length) {
+      return res.status(404).json({ message: "Module not found" });
+    }
+    const moduleTitle = moduleRes.rows[0].title;
+
     const _ = await client.query(`DELETE FROM modules WHERE id = $1`, [
       moduleId,
     ]);
 
     await client.query("COMMIT");
+    await logActivity({
+      userId: session.userId,
+      organisationId: session.organisation.id,
+      action: "delete_module",
+      metadata: { moduleId },
+      displayMetadata: { "module title": moduleTitle },
+    });
     return res.status(201).json({ success: true });
   } catch (err) {
     await client.query("ROLLBACK");
@@ -923,6 +980,13 @@ router.put("/update-module", upload.single("file"), async (req, res) => {
     }
 
     await client.query("COMMIT");
+    await logActivity({
+      userId: session.userId,
+      organisationId: session.organisation.id,
+      action: "edit_module",
+      metadata: { moduleId },
+      displayMetadata: { "module name": name },
+    });
     return res.status(200).json({ success: true });
   } catch (err) {
     await client.query("ROLLBACK");
@@ -1096,6 +1160,7 @@ router.post("/enroll-course", async (req, res) => {
   }
 
   const userId = session.userId;
+  const organisationId = session.organisation?.id;
   const { courseId } = req.body;
   if (!courseId) {
     return res.status(400).json({ message: "courseId is required" });
@@ -1113,6 +1178,16 @@ router.post("/enroll-course", async (req, res) => {
     );
 
     const enrollmentId = insertRes.rows[0].id;
+
+    const courseRes = await client.query(
+      `SELECT id, name FROM courses WHERE id = $1`,
+      [courseId]
+    );
+    if (!courseRes.rows.length) {
+      await client.query("ROLLBACK");
+      return res.status(404).json({ message: "Course not found" });
+    }
+    const courseName = courseRes.rows[0].name;
 
     const modulesRes = await client.query(
       `SELECT id
@@ -1132,6 +1207,13 @@ router.post("/enroll-course", async (req, res) => {
     }
 
     await client.query("COMMIT");
+    await logActivity({
+      userId,
+      organisationId,
+      action: "enroll_course",
+      metadata: { courseId },
+      displayMetadata: { "course name": courseName },
+    });
     return res.status(201).json({
       success: true,
       enrollment: insertRes.rows[0],
@@ -1163,6 +1245,7 @@ router.post("/unenroll-course", async (req, res) => {
   }
 
   const userId = session.userId;
+  const organisationId = session.organisation?.id;
   const { courseId } = req.body;
   if (!courseId) {
     return res.status(400).json({ message: "courseId is required" });
@@ -1171,6 +1254,16 @@ router.post("/unenroll-course", async (req, res) => {
   const client = await pool.connect();
   try {
     await client.query("BEGIN");
+
+    const courseRes = await client.query(
+      `SELECT id, name FROM courses WHERE id = $1`,
+      [courseId]
+    );
+    if (!courseRes.rows.length) {
+      await client.query("ROLLBACK");
+      return res.status(404).json({ message: "Course not found" });
+    }
+    const courseName = courseRes.rows[0].name;
 
     const delRes = await client.query(
       `DELETE FROM enrollments
@@ -1207,6 +1300,13 @@ router.post("/unenroll-course", async (req, res) => {
     );
 
     await client.query("COMMIT");
+    await logActivity({
+      userId,
+      organisationId,
+      action: "unenroll_course",
+      metadata: { courseId },
+      displayMetadata: { "course name": courseName },
+    });
     return res.status(200).json({ success: true });
   } catch (err) {
     await client.query("ROLLBACK");
@@ -1230,6 +1330,7 @@ router.post("/complete-course", async (req, res) => {
 
   const userId = session.userId;
   const { courseId } = req.body;
+  const organisationId = session.organisation?.id;
   if (!courseId) {
     return res.status(400).json({ message: "courseId is required" });
   }
@@ -1250,6 +1351,16 @@ router.post("/complete-course", async (req, res) => {
       [courseId, userId]
     );
 
+    const courseRes = await client.query(
+      `SELECT id, name FROM courses WHERE id = $1`,
+      [courseId]
+    );
+    if (!courseRes.rows.length) {
+      await client.query("ROLLBACK");
+      return res.status(404).json({ message: "Course not found" });
+    }
+    const courseName = courseRes.rows[0].name;
+
     const totalModules = modRes.rows[0].total_modules;
     const completedModules = modRes.rows[0].completed_modules;
     if (totalModules !== completedModules) {
@@ -1269,6 +1380,13 @@ router.post("/complete-course", async (req, res) => {
     );
 
     await client.query("COMMIT");
+    await logActivity({
+      userId,
+      organisationId,
+      action: "complete_course",
+      metadata: { courseId },
+      displayMetadata: { "course name": courseName },
+    });
     return res.status(200).json({ success: true });
   } catch (err) {
     await client.query("ROLLBACK");
@@ -1291,6 +1409,7 @@ router.post("/uncomplete-course", async (req, res) => {
   }
 
   const userId = session.userId;
+  const organisationId = session.organisation?.id;
   const { courseId } = req.body;
   if (!courseId) {
     return res.status(400).json({ message: "courseId is required" });
@@ -1299,6 +1418,16 @@ router.post("/uncomplete-course", async (req, res) => {
   const client = await pool.connect();
   try {
     await client.query("BEGIN");
+
+    const courseRes = await client.query(
+      `SELECT id, name FROM courses WHERE id = $1`,
+      [courseId]
+    );
+    if (!courseRes.rows.length) {
+      await client.query("ROLLBACK");
+      return res.status(404).json({ message: "Course not found" });
+    }
+    const courseName = courseRes.rows[0].name;
 
     await client.query(
       `UPDATE enrollments
@@ -1310,6 +1439,13 @@ router.post("/uncomplete-course", async (req, res) => {
     );
 
     await client.query("COMMIT");
+    await logActivity({
+      userId,
+      organisationId,
+      action: "uncomplete_course",
+      metadata: { courseId },
+      displayMetadata: { "course name": courseName },
+    });
     return res.status(200).json({ success: true });
   } catch (err) {
     await client.query("ROLLBACK");
@@ -1720,6 +1856,7 @@ router.post("/mark-module-started", async (req, res) => {
 
   const userId = session.userId;
   const moduleId = req.body.moduleId;
+  const organisationId = session.organisation?.id;
   if (!moduleId) {
     return res.status(400).json({ message: "moduleId is required" });
   }
@@ -1743,6 +1880,16 @@ router.post("/mark-module-started", async (req, res) => {
 
     const enrollmentId = enrolmentRes.rows[0]?.id;
 
+    const moduleRes = await client.query(
+      `SELECT id, title FROM modules WHERE id = $1 AND course_id = $2`,
+      [moduleId, courseId]
+    );
+    if (!moduleRes.rows.length) {
+      await client.query("ROLLBACK");
+      return res.status(404).json({ message: "Module not found" });
+    }
+    const moduleTitle = moduleRes.rows[0].title;
+
     const statusRes = await client.query(
       `SELECT status FROM module_status
          WHERE enrollment_id = $1 AND module_id = $2`,
@@ -1758,6 +1905,13 @@ router.post("/mark-module-started", async (req, res) => {
     );
 
     await client.query("COMMIT");
+    await logActivity({
+      userId,
+      organisationId,
+      action: "start_module",
+      metadata: { moduleId },
+      displayMetadata: { "module title": moduleTitle },
+    });
     return res.status(200).json({ status: "in_progress" });
   } catch (err) {
     await client.query("ROLLBACK");
@@ -1781,6 +1935,7 @@ router.post("/mark-module-completed", async (req, res) => {
 
   const userId = session.userId;
   const moduleId = req.body.moduleId;
+  const organisationId = session.organisation?.id;
   if (!moduleId) {
     return res.status(400).json({ message: "moduleId is required" });
   }
@@ -1804,6 +1959,16 @@ router.post("/mark-module-completed", async (req, res) => {
 
     const enrollmentId = enrolmentRes.rows[0]?.id;
 
+    const moduleRes = await client.query(
+      `SELECT id, title FROM modules WHERE id = $1 AND course_id = $2`,
+      [moduleId, courseId]
+    );
+    if (!moduleRes.rows.length) {
+      await client.query("ROLLBACK");
+      return res.status(404).json({ message: "Module not found" });
+    }
+    const moduleTitle = moduleRes.rows[0].title;
+
     const statusRes = await client.query(
       `SELECT status FROM module_status
          WHERE enrollment_id = $1 AND module_id = $2`,
@@ -1826,6 +1991,13 @@ router.post("/mark-module-completed", async (req, res) => {
     );
 
     await client.query("COMMIT");
+    await logActivity({
+      userId,
+      organisationId,
+      action: "complete_module",
+      metadata: { moduleId },
+      displayMetadata: { "module title": moduleTitle },
+    });
     return res.status(200).json({ status: "in_progress" });
   } catch (err) {
     await client.query("ROLLBACK");
@@ -1879,6 +2051,8 @@ router.post("/add-channel", async (req, res) => {
     return res.status(400).json({ message: "Invalid session data" });
   }
 
+  const userId = session.userId;
+
   const organisationId = session.organisation?.id;
   const isAdmin = session.organisation?.role === "admin";
   if (!isAdmin) {
@@ -1902,6 +2076,13 @@ router.post("/add-channel", async (req, res) => {
       [name, description || "", organisationId]
     );
     await client.query("COMMIT");
+    await logActivity({
+      userId,
+      organisationId,
+      action: "add_channel",
+      metadata: { name: name },
+      displayMetadata: { "channel name": name },
+    });
     return res.status(201).json({ success: true });
   } catch (err) {
     await client.query("ROLLBACK");
@@ -1926,6 +2107,8 @@ router.delete("/delete-channel", async (req, res) => {
     return res.status(400).json({ message: "Invalid session data" });
   }
 
+  const userId = session.userId;
+
   const organisationId = session.organisation?.id;
   const isAdmin = session.organisation?.role === "admin";
   if (!isAdmin) {
@@ -1942,11 +2125,27 @@ router.delete("/delete-channel", async (req, res) => {
   const client = await pool.connect();
   try {
     await client.query("BEGIN");
+    const channelRes = await client.query(
+      `SELECT id, name FROM channels WHERE id = $1 AND organisation_id = $2`,
+      [channelId, organisationId]
+    );
+    if (!channelRes.rows.length) {
+      await client.query("ROLLBACK");
+      return res.status(404).json({ message: "Channel not found" });
+    }
+    const channelName = channelRes.rows[0].name;
     await client.query(
       `DELETE FROM channels WHERE id = $1 AND organisation_id = $2`,
       [channelId, organisationId]
     );
     await client.query("COMMIT");
+    await logActivity({
+      userId,
+      organisationId,
+      action: "delete_channel",
+      metadata: { channelId },
+      displayMetadata: { "channel name": channelName },
+    });
     return res.status(200).json({ success: true });
   } catch (err) {
     await client.query("ROLLBACK");
@@ -2000,6 +2199,8 @@ router.post("/add-level", async (req, res) => {
     return res.status(400).json({ message: "Invalid session data" });
   }
 
+  const userId = session.userId;
+
   const organisationId = session.organisation?.id;
   const isAdmin = session.organisation?.role === "admin";
   if (!isAdmin) {
@@ -2023,6 +2224,16 @@ router.post("/add-level", async (req, res) => {
       [name, description || "", sort_order || 0, organisationId]
     );
     await client.query("COMMIT");
+    await logActivity({
+      userId,
+      organisationId,
+      action: "add_level",
+      metadata: {
+        name: name,
+        sortOrder: sort_order,
+      },
+      displayMetadata: { "level name": name },
+    });
     return res.status(201).json({ success: true });
   } catch (err) {
     await client.query("ROLLBACK");
@@ -2047,6 +2258,8 @@ router.delete("/delete-level", async (req, res) => {
     return res.status(400).json({ message: "Invalid session data" });
   }
 
+  const userId = session.userId;
+
   const organisationId = session.organisation?.id;
   const isAdmin = session.organisation?.role === "admin";
   if (!isAdmin) {
@@ -2063,11 +2276,27 @@ router.delete("/delete-level", async (req, res) => {
   const client = await pool.connect();
   try {
     await client.query("BEGIN");
+    const levelRes = await client.query(
+      `SELECT id, name FROM levels WHERE id = $1 AND organisation_id = $2`,
+      [levelId, organisationId]
+    );
+    if (!levelRes.rows.length) {
+      await client.query("ROLLBACK");
+      return res.status(404).json({ message: "Level not found" });
+    }
+    const levelName = levelRes.rows[0].name;
     await client.query(
       `DELETE FROM levels WHERE id = $1 AND organisation_id = $2`,
       [levelId, organisationId]
     );
     await client.query("COMMIT");
+    await logActivity({
+      userId,
+      organisationId,
+      action: "delete_level",
+      metadata: { levelId },
+      displayMetadata: { "level name": levelName },
+    });
     return res.status(200).json({ success: true });
   } catch (err) {
     await client.query("ROLLBACK");
@@ -2121,6 +2350,8 @@ router.post("/add-skill", async (req, res) => {
     return res.status(400).json({ message: "Invalid session data" });
   }
 
+  const userId = session.userId;
+
   const organisationId = session.organisation?.id;
   const isAdmin = session.organisation?.role === "admin";
   if (!isAdmin) {
@@ -2144,6 +2375,13 @@ router.post("/add-skill", async (req, res) => {
       [name, description || "", organisationId]
     );
     await client.query("COMMIT");
+    await logActivity({
+      userId,
+      organisationId,
+      action: "add_skill",
+      metadata: { name: name },
+      displayMetadata: { "skill name": name },
+    });
     return res.status(201).json({ success: true });
   } catch (err) {
     await client.query("ROLLBACK");
@@ -2167,7 +2405,7 @@ router.delete("/delete-skill", async (req, res) => {
   } catch {
     return res.status(400).json({ message: "Invalid session data" });
   }
-
+  const userId = session.userId;
   const organisationId = session.organisation?.id;
   const isAdmin = session.organisation?.role === "admin";
   if (!isAdmin) {
@@ -2184,11 +2422,27 @@ router.delete("/delete-skill", async (req, res) => {
   const client = await pool.connect();
   try {
     await client.query("BEGIN");
+    const skillRes = await client.query(
+      `SELECT id, name FROM skills WHERE id = $1 AND organisation_id = $2`,
+      [skillId, organisationId]
+    );
+    if (!skillRes.rows.length) {
+      await client.query("ROLLBACK");
+      return res.status(404).json({ message: "Skill not found" });
+    }
+    const skillName = skillRes.rows[0].name;
     await client.query(
       `DELETE FROM skills WHERE id = $1 AND organisation_id = $2`,
       [skillId, organisationId]
     );
     await client.query("COMMIT");
+    await logActivity({
+      userId,
+      organisationId,
+      action: "delete_skill",
+      metadata: { skillId },
+      displayMetadata: { "skill name": skillName },
+    });
     return res.status(200).json({ success: true });
   } catch (err) {
     await client.query("ROLLBACK");

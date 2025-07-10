@@ -8,6 +8,7 @@ const reportsRoutes = require("./routes/reports");
 const onboardingRoutes = require("./routes/onboarding");
 const roadmapRoutes = require("./routes/roadmaps");
 const materialRoutes = require("./routes/materials");
+const activityRoutes = require("./routes/activity");
 const pool = require("./database/db");
 const app = express();
 const PORT = process.env.PORT || 4000;
@@ -50,6 +51,7 @@ app.use("/api/reports", reportsRoutes);
 app.use("/api/onboarding", onboardingRoutes);
 app.use("/api/roadmaps", roadmapRoutes);
 app.use("/api/materials", materialRoutes);
+app.use("/api/activity", activityRoutes);
 
 app.listen(PORT, () => {
   console.log(`Server running on http://localhost:${PORT}`);

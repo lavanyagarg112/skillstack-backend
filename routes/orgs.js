@@ -2,6 +2,7 @@ const express = require("express");
 const pool = require("../database/db");
 const router = express.Router();
 const crypto = require("crypto");
+const logActivity = require("./activityLogger");
 
 function setAuthCookie(res, payload) {
   res.cookie("auth", JSON.stringify(payload), {
@@ -49,6 +50,13 @@ router.post("/", async (req, res) => {
     );
 
     await client.query("COMMIT");
+    await logActivity({
+      userId,
+      organisationId: org.id,
+      action: "create_organisation",
+      metadata: { organisationId: org.id },
+      displayMetadata: { "organisation name": organisationName },
+    });
     return res.status(201).json({ organisation: { ...org, role: "admin" } });
   } catch (err) {
     await client.query("ROLLBACK");
@@ -101,6 +109,19 @@ router.post("/addemployee", async (req, res) => {
     const org = orgRes.rows[0];
     const organisationId = org.id;
 
+    const adminUserIdRes = await client.query(
+      `SELECT admin_user_id FROM organisations WHERE id = $1`,
+      [organisationId]
+    );
+
+    const adminUserId = adminUserIdRes.rows[0].admin_user_id;
+
+    const employeeNameRes = await client.query(
+      `SELECT firstname, lastname, email FROM users WHERE id = $1`,
+      [userId]
+    );
+    const employeeName = employeeNameRes.rows[0];
+
     await client.query(
       `INSERT INTO organisation_users (user_id, organisation_id, role)
        VALUES ($1, $2, 'employee')`,
@@ -115,6 +136,17 @@ router.post("/addemployee", async (req, res) => {
         id: org.id,
         organisationname: org.organisation_name,
         role: "employee",
+      },
+    });
+    await logActivity({
+      userId: adminUserId,
+      organisationId,
+      action: "add_employee",
+      metadata: { organisationId },
+      displayMetadata: {
+        "organisation name": org.organisation_name,
+        "employee name": `${employeeName.firstname} ${employeeName.lastname}`,
+        "employee email": employeeName.email,
       },
     });
 
@@ -265,6 +297,17 @@ router.post("/settings", async (req, res) => {
       organisation: neworganisation,
     });
 
+    await logActivity({
+      userId,
+      organisationId: organisation_id,
+      action: "update_organisation_settings",
+      metadata: {
+        organisationId: organisation_id,
+        ai_enabled,
+        description,
+      },
+    });
+
     return res.json({ organisation: updateRes.rows[0] });
   } catch (err) {
     await client.query("ROLLBACK");
@@ -316,6 +359,12 @@ router.get("/generate-invite-code", async (req, res) => {
     }
 
     await client.query("COMMIT");
+    await logActivity({
+      userId,
+      organisationId,
+      action: "generate_invite_code",
+      metadata: { organisationId, inviteCode },
+    });
     return res.json({ inviteCode: updateRes.rows[0].current_invitation_id });
   } catch (err) {
     await client.query("ROLLBACK");
