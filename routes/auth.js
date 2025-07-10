@@ -2,6 +2,7 @@ const express = require("express");
 const bcrypt = require("bcrypt");
 const pool = require("../database/db");
 const router = express.Router();
+const logActivity = require("./activityLogger");
 
 function setAuthCookie(res, payload) {
   res.cookie("auth", JSON.stringify(payload), {
@@ -81,6 +82,12 @@ router.post("/login", async (req, res) => {
       hasCompletedOnboarding: u.has_completed_onboarding,
       organisation,
     });
+    await logActivity({
+      userId: u.id,
+      organisationId: organisation ? organisation.id : null,
+      action: "login",
+      metadata: { email },
+    });
     return res.json({ success: true });
   } catch (err) {
     console.error(err);
@@ -88,8 +95,14 @@ router.post("/login", async (req, res) => {
   }
 });
 
-router.post("/logout", (req, res) => {
+router.post("/logout", async (req, res) => {
+  const session = JSON.parse(req.cookies.auth || "{}");
   res.clearCookie("auth", { path: "/" }).json({ success: true });
+  await logActivity({
+    userId: session.userId,
+    organisationId: session.organisation ? session.organisation.id : null,
+    action: "logout",
+  });
 });
 
 router.get("/me", (req, res) => {
@@ -159,6 +172,12 @@ router.post("/complete-onboarding", async (req, res) => {
       ...user,
       hasCompletedOnboarding: true,
       organisation: organisation,
+    });
+
+    await logActivity({
+      userId: user.userId,
+      organisationId: organisation ? organisation.id : null,
+      action: "complete_onboarding",
     });
 
     res.json({ success: true });
