@@ -214,4 +214,34 @@ router.post("/logs", async (req, res) => {
   }
 });
 
+router.get("/history", async (req, res) => {
+  const user = getAuthUser(req);
+  if (!user || !user.isLoggedIn) {
+    return res.status(401).json({ message: "Not logged in" });
+  }
+
+  const userId = user.userId;
+  const organisationId = user.organisation?.id;
+  if (!organisationId) {
+    return res.status(403).json({ message: "Forbidden" });
+  }
+
+  try {
+    const client = await pool.connect();
+    const logs = await client.query(
+      `SELECT cl.id, c.name, m.title, cl.question, cl.answer, cl.created_at
+         FROM chat_logs cl, courses c, modules m
+         WHERE cl.course_id = c.id and cl.module_id = m.id AND
+         cl.user_id = $1 AND cl.organisation_id = $2
+         ORDER BY created_at DESC`,
+      [userId, organisationId]
+    );
+    await client.release();
+    return res.json({ success: true, logs: logs.rows });
+  } catch (err) {
+    console.error(err);
+    return res.status(500).json({ message: "Server error" });
+  }
+});
+
 module.exports = router;
