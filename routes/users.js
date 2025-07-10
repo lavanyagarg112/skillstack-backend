@@ -80,6 +80,11 @@ router.delete("/", async (req, res) => {
       [session.organisation?.id]
     );
     const adminUserId = adminUserIdRes.rows[0]?.admin_user_id;
+    const deleteUserNameRes = await client.query(
+      `SELECT firstname, lastname FROM users WHERE id = $1`,
+      [deleteUserId]
+    );
+    const deleteUserName = deleteUserNameRes.rows[0];
     const delRes = await client.query(
       `DELETE FROM users
          WHERE id = $1
@@ -94,7 +99,10 @@ router.delete("/", async (req, res) => {
       userId: adminUserId,
       organisationId: session.organisation?.id,
       action: "delete_user",
-      metadata: { deletedUserId },
+      metadata: { deleteUserId },
+      displayMetadata: {
+        "deleted user name": `${deleteUserName.firstname} ${deleteUserName.lastname}`,
+      },
     });
     return res.status(201).json({
       message: "User deleted successfully",

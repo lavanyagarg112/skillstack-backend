@@ -1,6 +1,7 @@
 const express = require("express");
 const pool = require("../database/db");
 const router = express.Router();
+const logActivity = require("./activityLogger");
 
 function getAuthUser(req) {
   const { auth } = req.cookies;

@@ -63,7 +63,7 @@ router.post("/", async (req, res) => {
       userId: user.userId,
       organisationId: user.organisation?.id,
       action: "create_roadmap",
-      metadata: { roadmapId: roadmap.id },
+      metadata: { roadmapId: result.rows[0].id },
       displayMetadata: { "roadmap name": name.trim() },
     });
 
@@ -104,8 +104,8 @@ router.put("/:id", async (req, res) => {
       userId: user.userId,
       organisationId: user.organisation?.id,
       action: "edit_roadmap",
-      metadata: { roadmapId: updated.id, newName: updated.name },
-      displayMetadata: { "roadmap name": updated.name },
+      metadata: { roadmapId: result.id, newName: name.trim() },
+      displayMetadata: { "roadmap name": name.trim() },
     });
 
     res.json({ roadmap: result.rows[0] });
@@ -269,6 +269,12 @@ router.post("/:id/items", async (req, res) => {
 
     const nextPosition = positionResult.rows[0].next_position;
 
+    const roadmapNameRes = await pool.query(
+      `SELECT name FROM roadmaps WHERE id = $1 AND user_id = $2`,
+      [id, user.userId]
+    );
+    const roadmapName = roadmapNameRes.rows[0]?.name;
+
     const courseIds = await getCoursesFromModules(client, [module_id]);
     const enrolledCourses = await ensureUserEnrolledInCourses(
       client,
@@ -303,7 +309,10 @@ router.post("/:id/items", async (req, res) => {
       organisationId: user.organisation?.id,
       action: "add_roadmap_item",
       metadata: { roadmapId: id, moduleId: module_id, position: nextPosition },
-      displayMetadata: { "module name": moduleName },
+      displayMetadata: {
+        "roadmap name": roadmapName,
+        "module name": moduleName,
+      },
     });
 
     res.status(201).json({
@@ -347,6 +356,12 @@ router.put("/:id/items/:moduleId", async (req, res) => {
       return res.status(404).json({ message: "Roadmap not found" });
     }
 
+    const roadmapNameRes = await pool.query(
+      `SELECT name FROM roadmaps WHERE id = $1 AND user_id = $2`,
+      [id, user.userId]
+    );
+    const roadmapName = roadmapNameRes.rows[0]?.name;
+
     const moduleNameRes = await pool.query(
       `SELECT mod.title as module_title
        FROM modules mod
@@ -381,7 +396,10 @@ router.put("/:id/items/:moduleId", async (req, res) => {
       organisationId: user.organisation?.id,
       action: "move_roadmap_item",
       metadata: { roadmapId: id, moduleId, newPosition: position },
-      displayMetadata: { "module name": moduleName },
+      displayMetadata: {
+        "roadmap name": roadmapName,
+        "module name": moduleName,
+      },
     });
 
     res.json({
@@ -419,6 +437,12 @@ router.delete("/:id/items/:moduleId", async (req, res) => {
     }
 
     const moduleName = moduleNameRes.rows[0].module_title;
+
+    const roadmapNameRes = await pool.query(
+      `SELECT name FROM roadmaps WHERE id = $1 AND user_id = $2`,
+      [id, user.userId]
+    );
+    const roadmapName = roadmapNameRes.rows[0]?.name;
     const result = await pool.query(
       `DELETE FROM roadmap_items 
        WHERE roadmap_id = $1 AND module_id = $2
@@ -439,7 +463,10 @@ router.delete("/:id/items/:moduleId", async (req, res) => {
       organisationId: user.organisation?.id,
       action: "remove_roadmap_item",
       metadata: { roadmapId: id, moduleId },
-      displayMetadata: { "module name": moduleName },
+      displayMetadata: {
+        "roadmap name": roadmapName,
+        "module name": moduleName,
+      },
     });
 
     res.json({ message: "Module removed from roadmap" });

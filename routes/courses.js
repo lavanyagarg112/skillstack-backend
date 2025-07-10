@@ -2051,6 +2051,8 @@ router.post("/add-channel", async (req, res) => {
     return res.status(400).json({ message: "Invalid session data" });
   }
 
+  const userId = session.userId;
+
   const organisationId = session.organisation?.id;
   const isAdmin = session.organisation?.role === "admin";
   if (!isAdmin) {
@@ -2078,7 +2080,7 @@ router.post("/add-channel", async (req, res) => {
       userId,
       organisationId,
       action: "add_channel",
-      metadata: { channelId: channel.id, name: channel.name },
+      metadata: { name: name },
       displayMetadata: { "channel name": name },
     });
     return res.status(201).json({ success: true });
@@ -2104,6 +2106,8 @@ router.delete("/delete-channel", async (req, res) => {
   } catch {
     return res.status(400).json({ message: "Invalid session data" });
   }
+
+  const userId = session.userId;
 
   const organisationId = session.organisation?.id;
   const isAdmin = session.organisation?.role === "admin";
@@ -2195,6 +2199,8 @@ router.post("/add-level", async (req, res) => {
     return res.status(400).json({ message: "Invalid session data" });
   }
 
+  const userId = session.userId;
+
   const organisationId = session.organisation?.id;
   const isAdmin = session.organisation?.role === "admin";
   if (!isAdmin) {
@@ -2223,9 +2229,8 @@ router.post("/add-level", async (req, res) => {
       organisationId,
       action: "add_level",
       metadata: {
-        levelId: level.id,
-        name: level.name,
-        sortOrder: level.sort_order,
+        name: name,
+        sortOrder: sort_order,
       },
       displayMetadata: { "level name": name },
     });
@@ -2252,6 +2257,8 @@ router.delete("/delete-level", async (req, res) => {
   } catch {
     return res.status(400).json({ message: "Invalid session data" });
   }
+
+  const userId = session.userId;
 
   const organisationId = session.organisation?.id;
   const isAdmin = session.organisation?.role === "admin";
@@ -2343,6 +2350,8 @@ router.post("/add-skill", async (req, res) => {
     return res.status(400).json({ message: "Invalid session data" });
   }
 
+  const userId = session.userId;
+
   const organisationId = session.organisation?.id;
   const isAdmin = session.organisation?.role === "admin";
   if (!isAdmin) {
@@ -2370,7 +2379,7 @@ router.post("/add-skill", async (req, res) => {
       userId,
       organisationId,
       action: "add_skill",
-      metadata: { skillId: skill.id, name: skill.name },
+      metadata: { name: name },
       displayMetadata: { "skill name": name },
     });
     return res.status(201).json({ success: true });
@@ -2396,7 +2405,7 @@ router.delete("/delete-skill", async (req, res) => {
   } catch {
     return res.status(400).json({ message: "Invalid session data" });
   }
-
+  const userId = session.userId;
   const organisationId = session.organisation?.id;
   const isAdmin = session.organisation?.role === "admin";
   if (!isAdmin) {

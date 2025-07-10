@@ -116,6 +116,12 @@ router.post("/addemployee", async (req, res) => {
 
     const adminUserId = adminUserIdRes.rows[0].admin_user_id;
 
+    const employeeNameRes = await client.query(
+      `SELECT firstname, lastname, email FROM users WHERE id = $1`,
+      [userId]
+    );
+    const employeeName = employeeNameRes.rows[0];
+
     await client.query(
       `INSERT INTO organisation_users (user_id, organisation_id, role)
        VALUES ($1, $2, 'employee')`,
@@ -137,7 +143,11 @@ router.post("/addemployee", async (req, res) => {
       organisationId,
       action: "add_employee",
       metadata: { organisationId },
-      displayMetadata: { "organisation name": org.organisation_name },
+      displayMetadata: {
+        "organisation name": org.organisation_name,
+        "employee name": `${employeeName.firstname} ${employeeName.lastname}`,
+        "employee email": employeeName.email,
+      },
     });
 
     return res.status(201).json({ organisation: { ...org, role: "employee" } });
