@@ -1,8 +1,8 @@
-// routes/orgs.js
 const express = require("express");
 const pool = require("../database/db");
 const router = express.Router();
 const crypto = require("crypto");
+const logActivity = require("./activityLogger");
 
 function setAuthCookie(res, payload) {
   res.cookie("auth", JSON.stringify(payload), {
@@ -14,7 +14,6 @@ function setAuthCookie(res, payload) {
   });
 }
 
-// Create a new organization AND make the current user its admin
 router.post("/", async (req, res) => {
   const { auth } = req.cookies;
   if (!auth) return res.status(401).json({ message: "Not authenticated" });
@@ -36,7 +35,6 @@ router.post("/", async (req, res) => {
   try {
     await client.query("BEGIN");
 
-    // 1) Insert into organisations
     const orgRes = await client.query(
       `INSERT INTO organisations (organisation_name, admin_user_id)
        VALUES ($1, $2)
@@ -45,7 +43,6 @@ router.post("/", async (req, res) => {
     );
     const org = orgRes.rows[0];
 
-    // 2) Link user → new org as admin
     await client.query(
       `INSERT INTO organisation_users (user_id, organisation_id, role)
        VALUES ($1, $2, 'admin')`,
@@ -53,11 +50,17 @@ router.post("/", async (req, res) => {
     );
 
     await client.query("COMMIT");
+    await logActivity({
+      userId,
+      organisationId: org.id,
+      action: "create_organisation",
+      metadata: { organisationId: org.id },
+      displayMetadata: { "organisation name": organisationName },
+    });
     return res.status(201).json({ organisation: { ...org, role: "admin" } });
   } catch (err) {
     await client.query("ROLLBACK");
     console.error(err);
-    // unique violation on org name
     if (err.code === "23505") {
       if (
         err.constraint === "organisations_organisation_name_admin_user_id_key"
@@ -96,7 +99,6 @@ router.post("/addemployee", async (req, res) => {
   try {
     await client.query("BEGIN");
 
-    // 1) See if org exists
     const orgRes = await client.query(
       `SELECT id, organisation_name FROM organisations WHERE current_invitation_id = $1`,
       [inviteCode]
@@ -107,7 +109,19 @@ router.post("/addemployee", async (req, res) => {
     const org = orgRes.rows[0];
     const organisationId = org.id;
 
-    // 2) Link user → new org as employee
+    const adminUserIdRes = await client.query(
+      `SELECT admin_user_id FROM organisations WHERE id = $1`,
+      [organisationId]
+    );
+
+    const adminUserId = adminUserIdRes.rows[0].admin_user_id;
+
+    const employeeNameRes = await client.query(
+      `SELECT firstname, lastname, email FROM users WHERE id = $1`,
+      [userId]
+    );
+    const employeeName = employeeNameRes.rows[0];
+
     await client.query(
       `INSERT INTO organisation_users (user_id, organisation_id, role)
        VALUES ($1, $2, 'employee')`,
@@ -115,6 +129,27 @@ router.post("/addemployee", async (req, res) => {
     );
 
     await client.query("COMMIT");
+
+    setAuthCookie(res, {
+      ...session,
+      organisation: {
+        id: org.id,
+        organisationname: org.organisation_name,
+        role: "employee",
+      },
+    });
+    await logActivity({
+      userId: adminUserId,
+      organisationId,
+      action: "add_employee",
+      metadata: { organisationId },
+      displayMetadata: {
+        "organisation name": org.organisation_name,
+        "employee name": `${employeeName.firstname} ${employeeName.lastname}`,
+        "employee email": employeeName.email,
+      },
+    });
+
     return res.status(201).json({ organisation: { ...org, role: "employee" } });
   } catch (err) {
     await client.query("ROLLBACK");
@@ -125,7 +160,6 @@ router.post("/addemployee", async (req, res) => {
   }
 });
 
-// Get the single organization (and role) for the current user
 router.get("/my", async (req, res) => {
   const { auth } = req.cookies;
   if (!auth) return res.status(401).json({ message: "Not authenticated" });
@@ -155,7 +189,6 @@ router.get("/my", async (req, res) => {
       return res.json({ organisation: null });
     }
 
-    // exactly one row guaranteed by PK on user_id
     return res.json({ organisation: result.rows[0] });
   } catch (err) {
     console.error(err);
@@ -190,7 +223,6 @@ router.get("/settings", async (req, res) => {
       return res.status(400).json({ message: "Organization not found" });
     }
 
-    // exactly one row guaranteed by PK on user_id
     return res.json({ organisation: result.rows[0] });
   } catch (err) {
     console.error(err);
@@ -265,6 +297,17 @@ router.post("/settings", async (req, res) => {
       organisation: neworganisation,
     });
 
+    await logActivity({
+      userId,
+      organisationId: organisation_id,
+      action: "update_organisation_settings",
+      metadata: {
+        organisationId: organisation_id,
+        ai_enabled,
+        description,
+      },
+    });
+
     return res.json({ organisation: updateRes.rows[0] });
   } catch (err) {
     await client.query("ROLLBACK");
@@ -316,6 +359,12 @@ router.get("/generate-invite-code", async (req, res) => {
     }
 
     await client.query("COMMIT");
+    await logActivity({
+      userId,
+      organisationId,
+      action: "generate_invite_code",
+      metadata: { organisationId, inviteCode },
+    });
     return res.json({ inviteCode: updateRes.rows[0].current_invitation_id });
   } catch (err) {
     await client.query("ROLLBACK");

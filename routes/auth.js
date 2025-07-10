@@ -2,6 +2,7 @@ const express = require("express");
 const bcrypt = require("bcrypt");
 const pool = require("../database/db");
 const router = express.Router();
+const logActivity = require("./activityLogger");
 
 function setAuthCookie(res, payload) {
   res.cookie("auth", JSON.stringify(payload), {
@@ -13,7 +14,6 @@ function setAuthCookie(res, payload) {
   });
 }
 
-// SIGN UP → POST /api/signup
 router.post("/signup", async (req, res) => {
   const { email, password, firstname, lastname } = req.body;
   try {
@@ -45,7 +45,6 @@ router.post("/signup", async (req, res) => {
   }
 });
 
-// LOG IN → POST /api/login
 router.post("/login", async (req, res) => {
   const { email, password } = req.body;
   try {
@@ -83,6 +82,13 @@ router.post("/login", async (req, res) => {
       hasCompletedOnboarding: u.has_completed_onboarding,
       organisation,
     });
+    await logActivity({
+      userId: u.id,
+      organisationId: organisation ? organisation.id : null,
+      action: "login",
+      metadata: { email },
+      displayMetadata: { email },
+    });
     return res.json({ success: true });
   } catch (err) {
     console.error(err);
@@ -90,12 +96,16 @@ router.post("/login", async (req, res) => {
   }
 });
 
-// LOGOUT → POST /api/logout
-router.post("/logout", (req, res) => {
+router.post("/logout", async (req, res) => {
+  const session = JSON.parse(req.cookies.auth || "{}");
   res.clearCookie("auth", { path: "/" }).json({ success: true });
+  await logActivity({
+    userId: session.userId,
+    organisationId: session.organisation ? session.organisation.id : null,
+    action: "logout",
+  });
 });
 
-// WHOAMI → GET /api/me
 router.get("/me", (req, res) => {
   const { auth } = req.cookies;
   if (!auth) return res.json({ isLoggedIn: false });
@@ -118,11 +128,6 @@ router.post("/complete-onboarding", async (req, res) => {
   }
 
   try {
-    await pool.query(
-      `UPDATE users SET has_completed_onboarding = true WHERE id = $1`,
-      [user.userId]
-    );
-
     const mem = await pool.query(
       `SELECT
      o.id                    AS id,
@@ -137,11 +142,43 @@ router.post("/complete-onboarding", async (req, res) => {
 
     const organisation = mem.rows[0] || null;
 
-    // Regenerate auth cookie
+    if (organisation && organisation.role === "employee") {
+      const questionCheck = await pool.query(
+        `SELECT COUNT(*) as question_count FROM onboarding_questions WHERE organisation_id = $1`,
+        [organisation.id]
+      );
+
+      const hasQuestions = parseInt(questionCheck.rows[0].question_count) > 0;
+
+      if (hasQuestions) {
+        const responseCheck = await pool.query(
+          `SELECT COUNT(*) as response_count FROM onboarding_responses WHERE user_id = $1`,
+          [user.userId]
+        );
+
+        if (parseInt(responseCheck.rows[0].response_count) === 0) {
+          return res.status(400).json({
+            message: "Onboarding questionnaire must be completed first",
+          });
+        }
+      }
+    }
+
+    await pool.query(
+      `UPDATE users SET has_completed_onboarding = true WHERE id = $1`,
+      [user.userId]
+    );
+
     setAuthCookie(res, {
       ...user,
       hasCompletedOnboarding: true,
       organisation: organisation,
+    });
+
+    await logActivity({
+      userId: user.userId,
+      organisationId: organisation ? organisation.id : null,
+      action: "complete_onboarding",
     });
 
     res.json({ success: true });

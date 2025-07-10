@@ -111,8 +111,12 @@ CREATE TABLE materials (
 );
 
 CREATE TABLE skills (
-  id   SERIAL PRIMARY KEY,
-  name VARCHAR(100) NOT NULL UNIQUE
+  id              SERIAL PRIMARY KEY,
+  name            VARCHAR(100) NOT NULL,
+  description     TEXT,
+  organisation_id INTEGER NOT NULL REFERENCES organisations(id) ON DELETE CASCADE,
+  created_at      TIMESTAMPTZ NOT NULL DEFAULT now(),
+  UNIQUE(name, organisation_id)
 );
 
 CREATE TABLE material_skills (
@@ -175,50 +179,41 @@ CREATE TABLE quiz_answers (
 );
 
 
--- 8. TAGS
-CREATE TABLE tags (
-  id   SERIAL PRIMARY KEY,
-  name VARCHAR(50) NOT NULL UNIQUE
+-- 8. CHANNELS, LEVELS & SKILLS
+-- Channels (topics) for courses
+CREATE TABLE channels (
+  id              SERIAL PRIMARY KEY,
+  name            VARCHAR(100) NOT NULL,
+  description     TEXT,
+  organisation_id INTEGER NOT NULL REFERENCES organisations(id) ON DELETE CASCADE,
+  created_at      TIMESTAMPTZ NOT NULL DEFAULT now(),
+  UNIQUE(name, organisation_id)
 );
 
-CREATE TABLE course_tags (
-  course_id INTEGER NOT NULL
-    REFERENCES courses(id) ON DELETE CASCADE,
-  tag_id    INTEGER NOT NULL
-    REFERENCES tags(id) ON DELETE CASCADE,
-  PRIMARY KEY(course_id, tag_id)
+-- Levels (difficulty) for courses
+CREATE TABLE levels (
+  id              SERIAL PRIMARY KEY,
+  name            VARCHAR(50) NOT NULL,
+  description     TEXT,
+  sort_order      INTEGER NOT NULL DEFAULT 0,
+  organisation_id INTEGER NOT NULL REFERENCES organisations(id) ON DELETE CASCADE,
+  created_at      TIMESTAMPTZ NOT NULL DEFAULT now(),
+  UNIQUE(name, organisation_id)
 );
 
-CREATE TABLE module_tags (
-  module_id INTEGER NOT NULL
-    REFERENCES modules(id) ON DELETE CASCADE,
-  tag_id    INTEGER NOT NULL
-    REFERENCES tags(id) ON DELETE CASCADE,
-  PRIMARY KEY(module_id, tag_id)
+-- Course-channel-level associations
+CREATE TABLE course_channels (
+  course_id  INTEGER NOT NULL REFERENCES courses(id) ON DELETE CASCADE,
+  channel_id INTEGER NOT NULL REFERENCES channels(id) ON DELETE CASCADE,
+  level_id   INTEGER NOT NULL REFERENCES levels(id) ON DELETE CASCADE,
+  PRIMARY KEY(course_id, channel_id, level_id)
 );
 
-CREATE TABLE revision_tags (
-  revision_id INTEGER NOT NULL
-    REFERENCES revisions(id) ON DELETE CASCADE,
-  tag_id      INTEGER NOT NULL
-    REFERENCES tags(id) ON DELETE CASCADE,
-  PRIMARY KEY(revision_id, tag_id)
-);
-
-CREATE TABLE quiz_tags (
-  quiz_id INTEGER NOT NULL
-    REFERENCES quizzes(id) ON DELETE CASCADE,
-  tag_id  INTEGER NOT NULL
-    REFERENCES tags(id) ON DELETE CASCADE,
-  PRIMARY KEY(quiz_id, tag_id)
-);
-
-CREATE TABLE question_tags (
-  question_id INTEGER NOT NULL
-    REFERENCES questions(id) ON DELETE CASCADE,
-  tag_id      INTEGER NOT NULL
-    REFERENCES tags(id) ON DELETE CASCADE,
-  PRIMARY KEY(question_id, tag_id)
+-- Module-skills associations
+CREATE TABLE module_skills (
+  module_id INTEGER NOT NULL REFERENCES modules(id) ON DELETE CASCADE,
+  skill_id  INTEGER NOT NULL REFERENCES skills(id) ON DELETE CASCADE,
+  PRIMARY KEY(module_id, skill_id)
 );
 
 
@@ -263,10 +258,80 @@ CREATE TABLE roadmaps (
 CREATE TABLE roadmap_items (
   roadmap_id  INTEGER NOT NULL
     REFERENCES roadmaps(id) ON DELETE CASCADE,
-  material_id INTEGER NOT NULL
-    REFERENCES materials(id) ON DELETE CASCADE,
+  module_id INTEGER NOT NULL
+    REFERENCES modules(id) ON DELETE CASCADE,
   position    INTEGER NOT NULL,
-  PRIMARY KEY(roadmap_id, material_id)
+  PRIMARY KEY(roadmap_id, module_id)
 );
+
+---
+
+  -- Table to store onboarding questions
+  CREATE TABLE onboarding_questions (
+    id            SERIAL PRIMARY KEY,
+    question_text TEXT NOT NULL,
+    position      INTEGER NOT NULL DEFAULT 0,
+    organisation_id INTEGER NOT NULL REFERENCES organisations(id) ON DELETE CASCADE
+  );
+
+  -- Table to store answer options for each question
+  CREATE TABLE onboarding_question_options (
+    id           SERIAL PRIMARY KEY,
+    question_id  INTEGER NOT NULL REFERENCES onboarding_questions(id) ON DELETE CASCADE,
+    option_text  TEXT NOT NULL,
+    skill_id     INTEGER REFERENCES skills(id) ON DELETE CASCADE,
+    channel_id INTEGER REFERENCES channels(id) ON DELETE CASCADE,
+    level_id INTEGER REFERENCES levels(id) ON DELETE CASCADE,
+  );
+
+  -- Table to store user responses
+  CREATE TABLE onboarding_responses (
+    user_id   INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    option_id INTEGER NOT NULL REFERENCES onboarding_question_options(id) ON DELETE CASCADE,
+    PRIMARY KEY(user_id, option_id)
+  );
+
+--  USER SKILLS
+CREATE TABLE user_skills (
+  id          SERIAL PRIMARY KEY,
+  user_id     INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  skill_id    INTEGER NOT NULL REFERENCES skills(id) ON DELETE CASCADE,
+  level       VARCHAR(50) NOT NULL DEFAULT 'beginner', -- 'beginner', 'intermediate', 'advanced', 'expert'
+  acquired_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
+  UNIQUE(user_id, skill_id)
+);
+
+-- Table for user channel preferences
+CREATE TABLE user_channels (
+  id              SERIAL PRIMARY KEY,
+  user_id         INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  channel_id      INTEGER NOT NULL REFERENCES channels(id) ON DELETE CASCADE,
+  preference_rank INTEGER NOT NULL DEFAULT 1,
+  added_at        TIMESTAMPTZ NOT NULL DEFAULT now(),
+  UNIQUE(user_id, channel_id)
+);
+
+-- Table for user level preferences  
+CREATE TABLE user_levels (
+  id              SERIAL PRIMARY KEY,
+  user_id         INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  level_id        INTEGER NOT NULL REFERENCES levels(id) ON DELETE CASCADE,
+  preference_rank INTEGER NOT NULL DEFAULT 1,
+  added_at        TIMESTAMPTZ NOT NULL DEFAULT now(),
+  UNIQUE(user_id, level_id)
+);
+
+CREATE TABLE activity_logs (
+  id            SERIAL PRIMARY KEY,
+  user_id       INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  organisation_id INTEGER REFERENCES organisations(id) ON DELETE SET NULL,
+  action        VARCHAR(50) NOT NULL,
+  metadata      JSONB        DEFAULT '{}'    NOT NULL,
+  created_at    TIMESTAMPTZ   NOT NULL DEFAULT now(),
+  display_metadata JSONB NOT NULL DEFAULT '{}'
+);
+
+
 
 COMMIT;

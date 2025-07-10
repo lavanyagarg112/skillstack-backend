@@ -21,18 +21,30 @@ router.get("/progress", async (req, res) => {
   try {
     await client.query("BEGIN");
 
-    // 1) Courses done
     const { rows: coursesDone } = await client.query(
-      `SELECT c.id, c.name, e.completed_at
+      `SELECT c.id, c.name, e.completed_at,
+              JSON_BUILD_OBJECT(
+                'id', ch.id,
+                'name', ch.name,
+                'description', ch.description
+              ) AS channel,
+              JSON_BUILD_OBJECT(
+                'id', l.id,
+                'name', l.name,
+                'description', l.description,
+                'sort_order', l.sort_order
+              ) AS level
          FROM enrollments e
          JOIN courses c ON c.id = e.course_id
+         LEFT JOIN course_channels cc ON cc.course_id = c.id
+         LEFT JOIN channels ch ON ch.id = cc.channel_id
+         LEFT JOIN levels l ON l.id = cc.level_id
         WHERE e.user_id = $1
           AND e.status = 'completed'
       `,
       [userId]
     );
 
-    // 2) Modules done
     const { rows: modCount } = await client.query(
       `SELECT COUNT(*) AS modules_done
          FROM module_status ms
@@ -44,7 +56,6 @@ router.get("/progress", async (req, res) => {
     );
     const modulesDone = parseInt(modCount[0].modules_done, 10);
 
-    // 3) Quiz results (latest per quiz)
     const { rows: quizResults } = await client.query(
       `WITH latest AS (
          SELECT DISTINCT ON (qr.quiz_id)
@@ -75,8 +86,7 @@ router.get("/progress", async (req, res) => {
       [userId]
     );
 
-    // Strengths & weaknesses by tag
-    const { rows: tagPerf } = await client.query(
+    const { rows: skillPerf } = await client.query(
       `WITH latest AS (
   SELECT DISTINCT ON (qr.quiz_id)
          qr.id        AS response_id,
@@ -87,8 +97,8 @@ router.get("/progress", async (req, res) => {
 ),
 user_ans AS (
   SELECT
-    mt.tag_id,
-    t.name       AS tag_name,
+    ms.skill_id,
+    s.name       AS skill_name,
     CASE WHEN qo.is_correct THEN 1 ELSE 0 END AS is_correct
   FROM latest l
   -- each answered option
@@ -98,23 +108,23 @@ user_ans AS (
   -- find the module that backs this quiz
   JOIN quizzes q           ON q.id = l.quiz_id
   JOIN revisions r         ON r.id = q.revision_id
-  JOIN module_tags mt      ON mt.module_id = r.module_id
-  JOIN tags t              ON t.id = mt.tag_id
+  JOIN module_skills ms    ON ms.module_id = r.module_id
+  JOIN skills s            ON s.id = ms.skill_id
 )
 SELECT
-  tag_name,
+  skill_name,
   SUM(is_correct)                AS correct,
   COUNT(*)                       AS total,
   ROUND(SUM(is_correct)::decimal * 100 / NULLIF(COUNT(*),0), 1) AS pct
 FROM user_ans
-GROUP BY tag_name
+GROUP BY skill_name
 
       `,
       [userId]
     );
 
-    const strengths = tagPerf.filter((r) => r.pct >= 80);
-    const weaknesses = tagPerf.filter((r) => r.pct < 80);
+    const strengths = skillPerf.filter((r) => r.pct >= 80);
+    const weaknesses = skillPerf.filter((r) => r.pct < 80);
 
     await client.query("COMMIT");
     return res.json({
@@ -166,12 +176,26 @@ router.get("/overview", requireAdmin, async (req, res) => {
         COUNT(DISTINCT m.id) FILTER (WHERE m.module_type = 'quiz')             AS quizzes,
        COUNT(DISTINCT m.id) FILTER (WHERE m.module_type = 'pdf')              AS pdfs,
         COUNT(DISTINCT m.id) FILTER (WHERE m.module_type = 'slide')            AS slides,
-        COUNT(DISTINCT m.id) FILTER (WHERE m.module_type NOT IN ('video','quiz','pdf','slide')) AS others
+        COUNT(DISTINCT m.id) FILTER (WHERE m.module_type NOT IN ('video','quiz','pdf','slide')) AS others,
+        JSON_BUILD_OBJECT(
+          'id', ch.id,
+          'name', ch.name,
+          'description', ch.description
+        ) AS channel,
+        JSON_BUILD_OBJECT(
+          'id', l.id,
+          'name', l.name,
+          'description', l.description,
+          'sort_order', l.sort_order
+        ) AS level
       FROM courses c
       LEFT JOIN enrollments e ON e.course_id = c.id
       LEFT JOIN modules     m ON m.course_id = c.id
+      LEFT JOIN course_channels cc ON cc.course_id = c.id
+      LEFT JOIN channels ch ON ch.id = cc.channel_id
+      LEFT JOIN levels l ON l.id = cc.level_id
       WHERE c.organisation_id = $1
-      GROUP BY c.id, c.name
+      GROUP BY c.id, c.name, ch.id, ch.name, ch.description, l.id, l.name, l.description, l.sort_order
       ORDER BY c.name
       `,
       [orgId]
@@ -198,9 +222,23 @@ router.get("/overview", requireAdmin, async (req, res) => {
         const uid = emp.id;
 
         const { rows: coursesDone } = await client.query(
-          `SELECT c.id, c.name, e.completed_at
+          `SELECT c.id, c.name, e.completed_at,
+                  JSON_BUILD_OBJECT(
+                    'id', ch.id,
+                    'name', ch.name,
+                    'description', ch.description
+                  ) AS channel,
+                  JSON_BUILD_OBJECT(
+                    'id', l.id,
+                    'name', l.name,
+                    'description', l.description,
+                    'sort_order', l.sort_order
+                  ) AS level
              FROM enrollments e
              JOIN courses c ON c.id = e.course_id
+             LEFT JOIN course_channels cc ON cc.course_id = c.id
+             LEFT JOIN channels ch ON ch.id = cc.channel_id
+             LEFT JOIN levels l ON l.id = cc.level_id
             WHERE e.user_id = $1
               AND e.status = 'completed'`,
           [uid]
@@ -252,7 +290,7 @@ router.get("/overview", requireAdmin, async (req, res) => {
           [uid]
         );
 
-        const { rows: tagPerf } = await client.query(
+        const { rows: skillPerf } = await client.query(
           `
           WITH latest AS (
             SELECT DISTINCT ON (qr.quiz_id)
@@ -264,30 +302,30 @@ router.get("/overview", requireAdmin, async (req, res) => {
           ),
           user_ans AS (
             SELECT
-              mt.tag_id,
-              t.name       AS tag_name,
+              ms.skill_id,
+              s.name       AS skill_name,
               CASE WHEN qo.is_correct THEN 1 ELSE 0 END AS is_correct
             FROM latest l
             JOIN quiz_answers      qa ON qa.response_id = l.response_id
             JOIN question_options qo ON qo.id = qa.selected_option_id
             JOIN quizzes           q  ON q.id = l.quiz_id
             JOIN revisions         r  ON r.id = q.revision_id
-            JOIN module_tags       mt ON mt.module_id = r.module_id
-            JOIN tags              t  ON t.id = mt.tag_id
+            JOIN module_skills     ms ON ms.module_id = r.module_id
+            JOIN skills            s  ON s.id = ms.skill_id
           )
           SELECT
-            tag_name,
+            skill_name,
             SUM(is_correct)                AS correct,
             COUNT(*)                       AS total,
             ROUND(SUM(is_correct)::decimal * 100 / NULLIF(COUNT(*),0), 1) AS pct
           FROM user_ans
-          GROUP BY tag_name
+          GROUP BY skill_name
           `,
           [uid]
         );
 
-        const strengths = tagPerf.filter((r) => r.pct >= 80);
-        const weaknesses = tagPerf.filter((r) => r.pct < 80);
+        const strengths = skillPerf.filter((r) => r.pct >= 80);
+        const weaknesses = skillPerf.filter((r) => r.pct < 80);
 
         return {
           id: emp.id,
