@@ -3,6 +3,7 @@ const pool = require("../database/db");
 const router = express.Router();
 const multer = require("multer");
 const path = require("path");
+const logActivity = require("./activityLogger");
 
 const storage = multer.diskStorage({
   destination: "uploads/",
@@ -65,6 +66,12 @@ router.post("/", async (req, res) => {
     );
 
     await client.query("COMMIT");
+    await logActivity({
+      userId,
+      organisationId,
+      action: "create_course",
+      metadata: { courseId },
+    });
     return res.status(201).json({ success: true });
   } catch (err) {
     await client.query("ROLLBACK");
@@ -238,6 +245,12 @@ router.delete("/", async (req, res) => {
     );
 
     await client.query("COMMIT");
+    await logActivity({
+      userId: session.userId,
+      organisationId: session.organisation.id,
+      action: "delete_course",
+      metadata: { courseId },
+    });
     return res.status(201).json({ success: true });
   } catch (err) {
     await client.query("ROLLBACK");
@@ -307,6 +320,12 @@ router.put("/", async (req, res) => {
     }
 
     await client.query("COMMIT");
+    await logActivity({
+      userId: session.userId,
+      organisationId: session.organisation.id,
+      action: "edit_course",
+      metadata: { courseId },
+    });
     return res.status(201).json({ success: true });
   } catch (err) {
     await client.query("ROLLBACK");
@@ -513,6 +532,12 @@ router.post("/add-module", upload.single("file"), async (req, res) => {
     }
 
     await client.query("COMMIT");
+    await logActivity({
+      userId: session.userId,
+      organisationId: session.organisation.id,
+      action: "add_module",
+      metadata: { moduleId },
+    });
     return res.status(201).json({
       module_id,
     });
@@ -554,6 +579,12 @@ router.delete("/delete-module", async (req, res) => {
     ]);
 
     await client.query("COMMIT");
+    await logActivity({
+      userId: session.userId,
+      organisationId: session.organisation.id,
+      action: "delete_module",
+      metadata: { moduleId },
+    });
     return res.status(201).json({ success: true });
   } catch (err) {
     await client.query("ROLLBACK");
@@ -923,6 +954,12 @@ router.put("/update-module", upload.single("file"), async (req, res) => {
     }
 
     await client.query("COMMIT");
+    await logActivity({
+      userId: session.userId,
+      organisationId: session.organisation.id,
+      action: "edit_module",
+      metadata: { moduleId },
+    });
     return res.status(200).json({ success: true });
   } catch (err) {
     await client.query("ROLLBACK");
@@ -1132,6 +1169,12 @@ router.post("/enroll-course", async (req, res) => {
     }
 
     await client.query("COMMIT");
+    await logActivity({
+      userId,
+      organisationId,
+      action: "enroll_course",
+      metadata: { courseId },
+    });
     return res.status(201).json({
       success: true,
       enrollment: insertRes.rows[0],
@@ -1207,6 +1250,12 @@ router.post("/unenroll-course", async (req, res) => {
     );
 
     await client.query("COMMIT");
+    await logActivity({
+      userId,
+      organisationId,
+      action: "unenroll_course",
+      metadata: { courseId },
+    });
     return res.status(200).json({ success: true });
   } catch (err) {
     await client.query("ROLLBACK");
@@ -1269,6 +1318,12 @@ router.post("/complete-course", async (req, res) => {
     );
 
     await client.query("COMMIT");
+    await logActivity({
+      userId,
+      organisationId,
+      action: "complete_course",
+      metadata: { courseId },
+    });
     return res.status(200).json({ success: true });
   } catch (err) {
     await client.query("ROLLBACK");
@@ -1310,6 +1365,12 @@ router.post("/uncomplete-course", async (req, res) => {
     );
 
     await client.query("COMMIT");
+    await logActivity({
+      userId,
+      organisationId,
+      action: "uncomplete_course",
+      metadata: { courseId },
+    });
     return res.status(200).json({ success: true });
   } catch (err) {
     await client.query("ROLLBACK");
@@ -1758,6 +1819,12 @@ router.post("/mark-module-started", async (req, res) => {
     );
 
     await client.query("COMMIT");
+    await logActivity({
+      userId,
+      organisationId,
+      action: "start_module",
+      metadata: { moduleId },
+    });
     return res.status(200).json({ status: "in_progress" });
   } catch (err) {
     await client.query("ROLLBACK");
@@ -1826,6 +1893,12 @@ router.post("/mark-module-completed", async (req, res) => {
     );
 
     await client.query("COMMIT");
+    await logActivity({
+      userId,
+      organisationId,
+      action: "complete_module",
+      metadata: { moduleId },
+    });
     return res.status(200).json({ status: "in_progress" });
   } catch (err) {
     await client.query("ROLLBACK");
@@ -1902,6 +1975,12 @@ router.post("/add-channel", async (req, res) => {
       [name, description || "", organisationId]
     );
     await client.query("COMMIT");
+    await logActivity({
+      userId,
+      organisationId,
+      action: "add_channel",
+      metadata: { channelId: channel.id, name: channel.name },
+    });
     return res.status(201).json({ success: true });
   } catch (err) {
     await client.query("ROLLBACK");
@@ -1947,6 +2026,12 @@ router.delete("/delete-channel", async (req, res) => {
       [channelId, organisationId]
     );
     await client.query("COMMIT");
+    await logActivity({
+      userId,
+      organisationId,
+      action: "delete_channel",
+      metadata: { channelId },
+    });
     return res.status(200).json({ success: true });
   } catch (err) {
     await client.query("ROLLBACK");
@@ -2023,6 +2108,16 @@ router.post("/add-level", async (req, res) => {
       [name, description || "", sort_order || 0, organisationId]
     );
     await client.query("COMMIT");
+    await logActivity({
+      userId,
+      organisationId,
+      action: "add_level",
+      metadata: {
+        levelId: level.id,
+        name: level.name,
+        sortOrder: level.sort_order,
+      },
+    });
     return res.status(201).json({ success: true });
   } catch (err) {
     await client.query("ROLLBACK");
@@ -2068,6 +2163,12 @@ router.delete("/delete-level", async (req, res) => {
       [levelId, organisationId]
     );
     await client.query("COMMIT");
+    await logActivity({
+      userId,
+      organisationId,
+      action: "delete_level",
+      metadata: { levelId },
+    });
     return res.status(200).json({ success: true });
   } catch (err) {
     await client.query("ROLLBACK");
@@ -2144,6 +2245,12 @@ router.post("/add-skill", async (req, res) => {
       [name, description || "", organisationId]
     );
     await client.query("COMMIT");
+    await logActivity({
+      userId,
+      organisationId,
+      action: "add_skill",
+      metadata: { skillId: skill.id, name: skill.name },
+    });
     return res.status(201).json({ success: true });
   } catch (err) {
     await client.query("ROLLBACK");
@@ -2189,6 +2296,12 @@ router.delete("/delete-skill", async (req, res) => {
       [skillId, organisationId]
     );
     await client.query("COMMIT");
+    await logActivity({
+      userId,
+      organisationId,
+      action: "delete_skill",
+      metadata: { skillId },
+    });
     return res.status(200).json({ success: true });
   } catch (err) {
     await client.query("ROLLBACK");
