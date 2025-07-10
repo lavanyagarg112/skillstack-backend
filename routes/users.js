@@ -74,6 +74,12 @@ router.delete("/", async (req, res) => {
 
   const client = await pool.connect();
   try {
+    const adminUserIdRes = await client.query(
+      `SELECT admin_user_id FROM organisations
+         WHERE id = $1`,
+      [session.organisation?.id]
+    );
+    const adminUserId = adminUserIdRes.rows[0]?.admin_user_id;
     const delRes = await client.query(
       `DELETE FROM users
          WHERE id = $1
@@ -85,7 +91,7 @@ router.delete("/", async (req, res) => {
     }
     await client.query("COMMIT");
     await logActivity({
-      userId: session.userId,
+      userId: adminUserId,
       organisationId: session.organisation?.id,
       action: "delete_user",
       metadata: { deletedUserId },
@@ -158,6 +164,7 @@ router.put("/profile", async (req, res) => {
       organisationId: session.organisation?.id,
       action: "update_profile",
       metadata: { firstname, lastname, email },
+      displayMetadata: { firstname, lastname, email },
     });
     return res.json({
       message: "Profile updated successfully",
@@ -324,6 +331,12 @@ router.post("/skills", async (req, res) => {
       return res.status(400).json({ message: "Skill already added" });
     }
 
+    const skillNameResult = await client.query(
+      "SELECT name FROM skills WHERE id = $1",
+      [skill_id]
+    );
+    const skillName = skillNameResult.rows[0]?.name;
+
     await client.query(
       "INSERT INTO user_skills (user_id, skill_id, level) VALUES ($1, $2, $3)",
       [session.userId, skill_id, level]
@@ -335,6 +348,7 @@ router.post("/skills", async (req, res) => {
       organisationId: session.organisation?.id,
       action: "add_user_skill",
       metadata: { skillId: skill_id, level },
+      displayMetadata: { "skill name": skillName, level },
     });
 
     return res.json({ message: "Skill added successfully" });
@@ -372,6 +386,12 @@ router.put("/skills", async (req, res) => {
   try {
     await client.query("BEGIN");
 
+    const skillNameResult = await client.query(
+      "SELECT name FROM skills WHERE id = $1",
+      [skill_id]
+    );
+    const skillName = skillNameResult.rows[0]?.name;
+
     const updateResult = await client.query(
       "UPDATE user_skills SET level = $1, updated_at = NOW() WHERE user_id = $2 AND skill_id = $3",
       [level, session.userId, skill_id]
@@ -388,6 +408,7 @@ router.put("/skills", async (req, res) => {
       organisationId: session.organisation?.id,
       action: "update_user_skill",
       metadata: { skillId: skill_id, newLevel: level },
+      displayMetadata: { "skill name": skillName, newLevel: level },
     });
 
     return res.json({ message: "Skill level updated successfully" });
@@ -420,6 +441,12 @@ router.delete("/skills", async (req, res) => {
   try {
     await client.query("BEGIN");
 
+    const skillNameResult = await client.query(
+      "SELECT name FROM skills WHERE id = $1",
+      [skill_id]
+    );
+    const skillName = skillNameResult.rows[0]?.name;
+
     const deleteResult = await client.query(
       "DELETE FROM user_skills WHERE user_id = $1 AND skill_id = $2",
       [session.userId, skill_id]
@@ -436,6 +463,7 @@ router.delete("/skills", async (req, res) => {
       organisationId: session.organisation?.id,
       action: "remove_user_skill",
       metadata: { skillId: skill_id },
+      displayMetadata: { "skill name": skillName },
     });
     return res.json({ message: "Skill removed successfully" });
   } catch (error) {
@@ -568,6 +596,12 @@ router.post("/preferences/channels", async (req, res) => {
 
     const nextRank = rankResult.rows[0].next_rank;
 
+    const channelNameResult = await client.query(
+      "SELECT name FROM channels WHERE id = $1",
+      [channel_id]
+    );
+    const channelName = channelNameResult.rows[0]?.name;
+
     await client.query(
       "INSERT INTO user_channels (user_id, channel_id, preference_rank) VALUES ($1, $2, $3)",
       [userId, channel_id, nextRank]
@@ -579,6 +613,7 @@ router.post("/preferences/channels", async (req, res) => {
       organisationId,
       action: "add_channel_preference",
       metadata: { channelId: channel_id, rank: nextRank },
+      displayMetadata: { "channel name": channelName },
     });
     return res.json({ message: "Channel preference added successfully" });
   } catch (error) {
@@ -642,6 +677,12 @@ router.post("/preferences/levels", async (req, res) => {
 
     const nextRank = rankResult.rows[0].next_rank;
 
+    const levelNameResult = await client.query(
+      "SELECT name FROM levels WHERE id = $1",
+      [level_id]
+    );
+    const levelName = levelNameResult.rows[0]?.name;
+
     await client.query(
       "INSERT INTO user_levels (user_id, level_id, preference_rank) VALUES ($1, $2, $3)",
       [userId, level_id, nextRank]
@@ -653,6 +694,7 @@ router.post("/preferences/levels", async (req, res) => {
       organisationId,
       action: "add_level_preference",
       metadata: { levelId: level_id, rank: nextRank },
+      displayMetadata: { "level name": levelName },
     });
     return res.json({ message: "Level preference added successfully" });
   } catch (error) {
@@ -687,6 +729,12 @@ router.delete("/preferences/channels", async (req, res) => {
   try {
     await client.query("BEGIN");
 
+    const channelNameResult = await client.query(
+      "SELECT name FROM channels WHERE id = $1",
+      [channel_id]
+    );
+    const channelName = channelNameResult.rows[0]?.name;
+
     const result = await client.query(
       "DELETE FROM user_channels WHERE user_id = $1 AND channel_id = $2",
       [userId, channel_id]
@@ -703,6 +751,7 @@ router.delete("/preferences/channels", async (req, res) => {
       organisationId,
       action: "remove_channel_preference",
       metadata: { channelId: channel_id },
+      displayMetadata: { "channel name": channelName },
     });
     return res.json({ message: "Channel preference removed successfully" });
   } catch (error) {
@@ -737,6 +786,12 @@ router.delete("/preferences/levels", async (req, res) => {
   try {
     await client.query("BEGIN");
 
+    const levelNameResult = await client.query(
+      "SELECT name FROM levels WHERE id = $1",
+      [level_id]
+    );
+    const levelName = levelNameResult.rows[0]?.name;
+
     const result = await client.query(
       "DELETE FROM user_levels WHERE user_id = $1 AND level_id = $2",
       [userId, level_id]
@@ -753,6 +808,7 @@ router.delete("/preferences/levels", async (req, res) => {
       organisationId,
       action: "remove_level_preference",
       metadata: { levelId: level_id },
+      displayMetadata: { "level name": levelName },
     });
 
     return res.json({ message: "Level preference removed successfully" });
