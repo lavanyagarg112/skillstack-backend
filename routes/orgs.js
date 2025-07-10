@@ -55,6 +55,7 @@ router.post("/", async (req, res) => {
       organisationId: org.id,
       action: "create_organisation",
       metadata: { organisationId: org.id },
+      displayMetadata: { "organisation name": organisationName },
     });
     return res.status(201).json({ organisation: { ...org, role: "admin" } });
   } catch (err) {
@@ -108,6 +109,13 @@ router.post("/addemployee", async (req, res) => {
     const org = orgRes.rows[0];
     const organisationId = org.id;
 
+    const adminUserIdRes = await client.query(
+      `SELECT admin_user_id FROM organisations WHERE id = $1`,
+      [organisationId]
+    );
+
+    const adminUserId = adminUserIdRes.rows[0].admin_user_id;
+
     await client.query(
       `INSERT INTO organisation_users (user_id, organisation_id, role)
        VALUES ($1, $2, 'employee')`,
@@ -125,10 +133,11 @@ router.post("/addemployee", async (req, res) => {
       },
     });
     await logActivity({
-      userId,
+      userId: adminUserId,
       organisationId,
       action: "add_employee",
       metadata: { organisationId },
+      displayMetadata: { "organisation name": org.organisation_name },
     });
 
     return res.status(201).json({ organisation: { ...org, role: "employee" } });
