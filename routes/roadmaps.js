@@ -578,23 +578,7 @@ router.post("/generate", async (req, res) => {
          ORDER BY matching_skills DESC, channel_match DESC, level_match DESC, random_score
          LIMIT 10`; // Limit to top 10 modules
 
-      console.log("Generated Query:", query);
-      console.log("Query Parameters:", params);
-
       const modulesResult = await client.query(query, params);
-
-      console.log("Query Results:", modulesResult.rows.length, "modules found");
-      console.log(
-        "Module Details:",
-        modulesResult.rows.map((row) => ({
-          id: row.id,
-          matching_skills: row.matching_skills,
-          channel_match: row.channel_match,
-          level_match: row.level_match,
-          channel_id: row.channel_id,
-          level_id: row.level_id,
-        }))
-      );
 
       if (modulesResult.rows.length > 0) {
         const moduleIds = modulesResult.rows.map((row) => row.id);

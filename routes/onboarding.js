@@ -479,10 +479,6 @@ router.post("/responses", async (req, res) => {
               [roadmapId, moduleIds[i], i + 1]
             );
           }
-
-          console.log(
-            `Auto-generated roadmap "${roadmapResult.rows[0].name}" with ${moduleIds.length} modules for user ${user.userId}`
-          );
         }
       }
     } catch (roadmapError) {

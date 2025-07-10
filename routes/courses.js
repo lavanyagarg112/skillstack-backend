@@ -551,7 +551,7 @@ router.post("/add-module", upload.single("file"), async (req, res) => {
       userId: session.userId,
       organisationId: session.organisation.id,
       action: "add_module",
-      metadata: { moduleId },
+      metadata: { module_id },
       displayMetadata: { "module name": name },
     });
     return res.status(201).json({
