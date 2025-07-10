@@ -1,6 +1,7 @@
 const express = require("express");
 const pool = require("../database/db");
 const router = express.Router();
+const logActivity = require("./activityLogger");
 const {
   getUserPreferences,
   getCoursesFromModules,
@@ -58,6 +59,13 @@ router.post("/", async (req, res) => {
       [user.userId, name.trim()]
     );
 
+    await logActivity({
+      userId: user.userId,
+      organisationId: user.organisation?.id,
+      action: "create_roadmap",
+      metadata: { roadmapId: roadmap.id },
+    });
+
     res.status(201).json({ roadmap: result.rows[0] });
   } catch (err) {
     console.error(err);
@@ -91,6 +99,13 @@ router.put("/:id", async (req, res) => {
       return res.status(404).json({ message: "Roadmap not found" });
     }
 
+    await logActivity({
+      userId: user.userId,
+      organisationId: user.organisation?.id,
+      action: "edit_roadmap",
+      metadata: { roadmapId: updated.id, newName: updated.name },
+    });
+
     res.json({ roadmap: result.rows[0] });
   } catch (err) {
     console.error(err);
@@ -117,6 +132,13 @@ router.delete("/:id", async (req, res) => {
     if (result.rows.length === 0) {
       return res.status(404).json({ message: "Roadmap not found" });
     }
+
+    await logActivity({
+      userId: user.userId,
+      organisationId: user.organisation?.id,
+      action: "delete_roadmap",
+      metadata: { roadmapId: id },
+    });
 
     res.json({ message: "Roadmap deleted successfully" });
   } catch (err) {
@@ -249,6 +271,13 @@ router.post("/:id/items", async (req, res) => {
 
     await client.query("COMMIT");
 
+    await logActivity({
+      userId: user.userId,
+      organisationId: user.organisation?.id,
+      action: "add_roadmap_item",
+      metadata: { roadmapId: id, moduleId: module_id, position: nextPosition },
+    });
+
     res.status(201).json({
       message: "Module added to roadmap",
       position: nextPosition,
@@ -305,6 +334,13 @@ router.put("/:id/items/:moduleId", async (req, res) => {
 
     await client.query("COMMIT");
 
+    await logActivity({
+      userId: user.userId,
+      organisationId: user.organisation?.id,
+      action: "move_roadmap_item",
+      metadata: { roadmapId: id, moduleId, newPosition: position },
+    });
+
     res.json({
       message: "Position updated",
       position: result.rows[0].position,
@@ -341,6 +377,13 @@ router.delete("/:id/items/:moduleId", async (req, res) => {
     if (result.rows.length === 0) {
       return res.status(404).json({ message: "Roadmap item not found" });
     }
+
+    await logActivity({
+      userId: user.userId,
+      organisationId: user.organisation?.id,
+      action: "remove_roadmap_item",
+      metadata: { roadmapId: id, moduleId },
+    });
 
     res.json({ message: "Module removed from roadmap" });
   } catch (err) {
@@ -493,6 +536,13 @@ router.post("/generate", async (req, res) => {
     }
 
     await client.query("COMMIT");
+
+    await logActivity({
+      userId: user.userId,
+      organisationId: user.organisation?.id,
+      action: "generate_roadmap",
+      metadata: { roadmapId: roadmap.id, modulesAdded, enrolledCourses },
+    });
 
     res.status(201).json({
       roadmap,
