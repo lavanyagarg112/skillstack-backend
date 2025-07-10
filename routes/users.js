@@ -2,6 +2,7 @@ const express = require("express");
 const bcrypt = require("bcrypt");
 const pool = require("../database/db");
 const router = express.Router();
+const logActivity = require("./activityLogger");
 
 function setAuthCookie(res, payload) {
   res.cookie("auth", JSON.stringify(payload), {
@@ -83,6 +84,12 @@ router.delete("/", async (req, res) => {
       return res.status(404).json({ message: "User not found" });
     }
     await client.query("COMMIT");
+    await logActivity({
+      userId: session.userId,
+      organisationId: session.organisation?.id,
+      action: "delete_user",
+      metadata: { deletedUserId },
+    });
     return res.status(201).json({
       message: "User deleted successfully",
     });
@@ -146,6 +153,12 @@ router.put("/profile", async (req, res) => {
     setAuthCookie(res, updatedSession);
 
     await client.query("COMMIT");
+    await logActivity({
+      userId: session.userId,
+      organisationId: session.organisation?.id,
+      action: "update_profile",
+      metadata: { firstname, lastname, email },
+    });
     return res.json({
       message: "Profile updated successfully",
       user: updatedSession,
@@ -214,6 +227,12 @@ router.put("/password", async (req, res) => {
     ]);
 
     await client.query("COMMIT");
+    await logActivity({
+      userId: session.userId,
+      organisationId: session.organisation?.id,
+      action: "update_password",
+      metadata: {},
+    });
     return res.json({ message: "Password updated successfully" });
   } catch (error) {
     await client.query("ROLLBACK");
@@ -311,6 +330,13 @@ router.post("/skills", async (req, res) => {
     );
 
     await client.query("COMMIT");
+    await logActivity({
+      userId: session.userId,
+      organisationId: session.organisation?.id,
+      action: "add_user_skill",
+      metadata: { skillId: skill_id, level },
+    });
+
     return res.json({ message: "Skill added successfully" });
   } catch (error) {
     await client.query("ROLLBACK");
@@ -357,6 +383,13 @@ router.put("/skills", async (req, res) => {
     }
 
     await client.query("COMMIT");
+    await logActivity({
+      userId: session.userId,
+      organisationId: session.organisation?.id,
+      action: "update_user_skill",
+      metadata: { skillId: skill_id, newLevel: level },
+    });
+
     return res.json({ message: "Skill level updated successfully" });
   } catch (error) {
     await client.query("ROLLBACK");
@@ -398,6 +431,12 @@ router.delete("/skills", async (req, res) => {
     }
 
     await client.query("COMMIT");
+    await logActivity({
+      userId: session.userId,
+      organisationId: session.organisation?.id,
+      action: "remove_user_skill",
+      metadata: { skillId: skill_id },
+    });
     return res.json({ message: "Skill removed successfully" });
   } catch (error) {
     await client.query("ROLLBACK");
@@ -535,6 +574,12 @@ router.post("/preferences/channels", async (req, res) => {
     );
 
     await client.query("COMMIT");
+    await logActivity({
+      userId,
+      organisationId,
+      action: "add_channel_preference",
+      metadata: { channelId: channel_id, rank: nextRank },
+    });
     return res.json({ message: "Channel preference added successfully" });
   } catch (error) {
     await client.query("ROLLBACK");
@@ -603,6 +648,12 @@ router.post("/preferences/levels", async (req, res) => {
     );
 
     await client.query("COMMIT");
+    await logActivity({
+      userId,
+      organisationId,
+      action: "add_level_preference",
+      metadata: { levelId: level_id, rank: nextRank },
+    });
     return res.json({ message: "Level preference added successfully" });
   } catch (error) {
     await client.query("ROLLBACK");
@@ -646,6 +697,12 @@ router.delete("/preferences/channels", async (req, res) => {
     }
 
     await client.query("COMMIT");
+    await logActivity({
+      userId,
+      organisationId,
+      action: "remove_channel_preference",
+      metadata: { channelId: channel_id },
+    });
     return res.json({ message: "Channel preference removed successfully" });
   } catch (error) {
     await client.query("ROLLBACK");
@@ -689,6 +746,13 @@ router.delete("/preferences/levels", async (req, res) => {
     }
 
     await client.query("COMMIT");
+    await logActivity({
+      userId,
+      organisationId,
+      action: "remove_level_preference",
+      metadata: { levelId: level_id },
+    });
+
     return res.json({ message: "Level preference removed successfully" });
   } catch (error) {
     await client.query("ROLLBACK");
