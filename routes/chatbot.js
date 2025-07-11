@@ -64,6 +64,13 @@ router.post("/ask", async (req, res) => {
     return res.status(403).json({ message: "Forbidden" });
   }
 
+  const isAiEnabled = user.organisation?.ai_enabled;
+  if (!isAiEnabled) {
+    return res
+      .status(403)
+      .json({ message: "AI assistance is disabled for your organization" });
+  }
+
   const { courseId, moduleId, question } = req.body;
   if (!courseId || !moduleId) {
     return res
@@ -191,6 +198,13 @@ router.post("/logs", async (req, res) => {
     return res.status(403).json({ message: "Forbidden" });
   }
 
+  const isAiEnabled = user.organisation?.ai_enabled;
+  if (!isAiEnabled) {
+    return res
+      .status(403)
+      .json({ message: "AI assistance is disabled for your organization" });
+  }
+
   const { courseId, moduleId } = req.body;
   if (!courseId || !moduleId) {
     return res
@@ -225,6 +239,13 @@ router.get("/history", async (req, res) => {
   const organisationId = user.organisation?.id;
   if (!organisationId) {
     return res.status(403).json({ message: "Forbidden" });
+  }
+
+  const isAiEnabled = user.organisation?.ai_enabled;
+  if (!isAiEnabled) {
+    return res
+      .status(403)
+      .json({ message: "AI assistance is disabled for your organization" });
   }
 
   try {

@@ -492,6 +492,15 @@ router.post("/generate", async (req, res) => {
     return res.status(400).json({ message: "Organization required" });
   }
 
+  const isAiEnabled = user.organisation?.ai_enabled;
+  if (!isAiEnabled) {
+    return res
+      .status(403)
+      .json({
+        message: "AI roadmap generation is disabled for your organization",
+      });
+  }
+
   const client = await pool.connect();
   try {
     await client.query("BEGIN");

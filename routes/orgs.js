@@ -100,7 +100,7 @@ router.post("/addemployee", async (req, res) => {
     await client.query("BEGIN");
 
     const orgRes = await client.query(
-      `SELECT id, organisation_name FROM organisations WHERE current_invitation_id = $1`,
+      `SELECT id, organisation_name, ai_enabled FROM organisations WHERE current_invitation_id = $1`,
       [inviteCode]
     );
     if (!orgRes.rows.length) {
@@ -135,6 +135,7 @@ router.post("/addemployee", async (req, res) => {
       organisation: {
         id: org.id,
         organisationname: org.organisation_name,
+        ai_enabled: org.ai_enabled,
         role: "employee",
       },
     });
@@ -281,6 +282,7 @@ router.post("/settings", async (req, res) => {
       `SELECT
      o.id                    AS id,
      o.organisation_name     AS organisationname,
+     o.ai_enabled            AS ai_enabled,
      ou.role                 AS role
    FROM organisation_users ou
    JOIN organisations o

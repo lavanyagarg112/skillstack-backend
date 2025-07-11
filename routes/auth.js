@@ -69,6 +69,7 @@ router.post("/login", async (req, res) => {
       `SELECT
      o.id                    AS id,
      o.organisation_name     AS organisationname,
+      o.ai_enabled            AS ai_enabled,
      ou.role                 AS role
    FROM organisation_users ou
    JOIN organisations o
@@ -137,6 +138,7 @@ router.post("/complete-onboarding", async (req, res) => {
       `SELECT
      o.id                    AS id,
      o.organisation_name     AS organisationname,
+      o.ai_enabled            AS ai_enabled,
      ou.role                 AS role
    FROM organisation_users ou
    JOIN organisations o
