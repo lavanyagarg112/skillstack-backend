@@ -591,17 +591,22 @@ router.delete("/delete-module", async (req, res) => {
     await client.query("BEGIN");
 
     const moduleRes = await client.query(
-      `SELECT id, title FROM modules WHERE id = $1`,
+      `SELECT id, title, position FROM modules WHERE id = $1`,
       [moduleId]
     );
     if (!moduleRes.rows.length) {
       return res.status(404).json({ message: "Module not found" });
     }
-    const moduleTitle = moduleRes.rows[0].title;
+    const { position, title: moduleTitle } = moduleRes.rows[0];
 
     const _ = await client.query(`DELETE FROM modules WHERE id = $1`, [
       moduleId,
     ]);
+
+    await client.query(
+      `UPDATE modules SET position = position - 1 WHERE position > $1`,
+      [position]
+    );
 
     await client.query("COMMIT");
     await logActivity({
