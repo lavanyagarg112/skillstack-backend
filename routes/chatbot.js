@@ -255,11 +255,139 @@ router.get("/history", async (req, res) => {
          FROM chat_logs cl, courses c, modules m
          WHERE cl.course_id = c.id and cl.module_id = m.id AND
          cl.user_id = $1 AND cl.organisation_id = $2
-         ORDER BY created_at DESC`,
+         ORDER BY cl.course_id, cl.module_id, created_at DESC`,
       [userId, organisationId]
     );
     await client.release();
     return res.json({ success: true, logs: logs.rows });
+  } catch (err) {
+    console.error(err);
+    return res.status(500).json({ message: "Server error" });
+  }
+});
+
+router.delete("/module-log", async (req, res) => {
+  const { auth } = req.cookies;
+  if (!auth) return res.status(401).json({ message: "Not authenticated" });
+  let user;
+  try {
+    user = JSON.parse(auth);
+  } catch {
+    return res.status(400).json({ message: "Invalid session" });
+  }
+  if (!user.isLoggedIn) {
+    return res.status(401).json({ message: "Not logged in" });
+  }
+
+  const userId = user.userId;
+  const organisationId = user.organisation?.id;
+  if (!organisationId) {
+    return res.status(403).json({ message: "Forbidden" });
+  }
+
+  const isAiEnabled = user.organisation?.ai_enabled;
+  if (!isAiEnabled) {
+    return res
+      .status(403)
+      .json({ message: "AI assistance is disabled for your organization" });
+  }
+
+  const { moduleId } = req.body;
+  if (!moduleId) {
+    return res.status(400).json({ message: "Module ID is required" });
+  }
+  try {
+    const client = await pool.connect();
+    await client.query(
+      `DELETE FROM chat_logs WHERE module_id = $1 AND user_id = $2 AND organisation_id = $3`,
+      [moduleId, userId, organisationId]
+    );
+    await client.release();
+    return res.json({ success: true });
+  } catch (err) {
+    console.error(err);
+    return res.status(500).json({ message: "Server error" });
+  }
+});
+
+router.delete("/course-log", async (req, res) => {
+  const { auth } = req.cookies;
+  if (!auth) return res.status(401).json({ message: "Not authenticated" });
+  let user;
+  try {
+    user = JSON.parse(auth);
+  } catch {
+    return res.status(400).json({ message: "Invalid session" });
+  }
+  if (!user.isLoggedIn) {
+    return res.status(401).json({ message: "Not logged in" });
+  }
+
+  const userId = user.userId;
+  const organisationId = user.organisation?.id;
+  if (!organisationId) {
+    return res.status(403).json({ message: "Forbidden" });
+  }
+
+  const isAiEnabled = user.organisation?.ai_enabled;
+  if (!isAiEnabled) {
+    return res
+      .status(403)
+      .json({ message: "AI assistance is disabled for your organization" });
+  }
+
+  const { courseId } = req.body;
+  if (!courseId) {
+    return res.status(400).json({ message: "Course ID is required" });
+  }
+  try {
+    const client = await pool.connect();
+    await client.query(
+      `DELETE FROM chat_logs WHERE course_id = $1 AND user_id = $2 AND organisation_id = $3`,
+      [courseId, userId, organisationId]
+    );
+    await client.release();
+    return res.json({ success: true });
+  } catch (err) {
+    console.error(err);
+    return res.status(500).json({ message: "Server error" });
+  }
+});
+
+router.delete("/all-logs", async (req, res) => {
+  const { auth } = req.cookies;
+  if (!auth) return res.status(401).json({ message: "Not authenticated" });
+  let user;
+  try {
+    user = JSON.parse(auth);
+  } catch {
+    return res.status(400).json({ message: "Invalid session" });
+  }
+  if (!user.isLoggedIn) {
+    return res.status(401).json({ message: "Not logged in" });
+  }
+
+  const userId = user.userId;
+  const organisationId = user.organisation?.id;
+  if (!organisationId) {
+    return res.status(403).json({ message: "Forbidden" });
+  }
+
+  const isAiEnabled = user.organisation?.ai_enabled;
+  if (!isAiEnabled) {
+    return res
+      .status(403)
+      .json({ message: "AI assistance is disabled for your organization" });
+  }
+
+  try {
+    const client = await pool.connect();
+    await client.query(
+      `DELETE FROM chat_logs WHERE user_id = $1 AND organisation_id = $2`,
+      [userId, organisationId]
+    );
+    await client.release();
+    return res.json({ success: true });
   } catch (err) {
     console.error(err);
     return res.status(500).json({ message: "Server error" });
