@@ -575,7 +575,7 @@ router.post("/generate", async (req, res) => {
       }
 
       query += ` GROUP BY mod.id, cc.channel_id, cc.level_id
-         ORDER BY matching_skills DESC, channel_match DESC, level_match DESC, random_score
+         ORDER BY mod.course_id, matching_skills DESC, channel_match DESC, level_match DESC, random_score
          LIMIT 10`; // Limit to top 10 modules
 
       const modulesResult = await client.query(query, params);
