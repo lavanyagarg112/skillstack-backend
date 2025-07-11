@@ -370,6 +370,8 @@ router.post("/responses", async (req, res) => {
     return res.status(400).json({ message: "option_ids array is required" });
   }
 
+  const isAiEnabled = user.organisation?.ai_enabled;
+
   const client = await pool.connect();
   try {
     await client.query("BEGIN");
@@ -394,24 +396,25 @@ router.post("/responses", async (req, res) => {
       [user.userId]
     );
 
-    try {
-      const {
-        getUserPreferences,
-        getCoursesFromModules,
-        ensureUserEnrolledInCourses,
-      } = require("./roadmaps-helpers");
+    if (isAiEnabled) {
+      try {
+        const {
+          getUserPreferences,
+          getCoursesFromModules,
+          ensureUserEnrolledInCourses,
+        } = require("./roadmaps-helpers");
 
-      const preferences = await getUserPreferences(client, user.userId);
+        const preferences = await getUserPreferences(client, user.userId);
 
-      const hasPreferences =
-        preferences.skills.length > 0 ||
-        preferences.memberChannels.length > 0 ||
-        preferences.onboardingChannels.length > 0 ||
-        preferences.memberLevels.length > 0 ||
-        preferences.onboardingLevels.length > 0;
+        const hasPreferences =
+          preferences.skills.length > 0 ||
+          preferences.memberChannels.length > 0 ||
+          preferences.onboardingChannels.length > 0 ||
+          preferences.memberLevels.length > 0 ||
+          preferences.onboardingLevels.length > 0;
 
-      if (hasPreferences) {
-        let moduleQuery = `SELECT DISTINCT
+        if (hasPreferences) {
+          let moduleQuery = `SELECT DISTINCT
              mod.id,
              COUNT(DISTINCT ms.skill_id) as matching_skills,
              COALESCE(
@@ -438,51 +441,52 @@ router.post("/responses", async (req, res) => {
            WHERE c.organisation_id = $1 
              AND (mst.status IS NULL OR mst.status IN ('not_started', 'in_progress'))`;
 
-        let moduleParams = [
-          user.organisation.id,
-          preferences.memberChannels,
-          preferences.onboardingChannels,
-          preferences.memberLevels,
-          preferences.onboardingLevels,
-          user.userId,
-        ];
+          let moduleParams = [
+            user.organisation.id,
+            preferences.memberChannels,
+            preferences.onboardingChannels,
+            preferences.memberLevels,
+            preferences.onboardingLevels,
+            user.userId,
+          ];
 
-        if (preferences.skills.length > 0) {
-          moduleQuery += ` AND ms.skill_id = ANY($7)`;
-          moduleParams.push(preferences.skills);
-        }
+          if (preferences.skills.length > 0) {
+            moduleQuery += ` AND ms.skill_id = ANY($7)`;
+            moduleParams.push(preferences.skills);
+          }
 
-        moduleQuery += ` GROUP BY mod.id, cc.channel_id, cc.level_id
+          moduleQuery += ` GROUP BY mod.id, cc.channel_id, cc.level_id
            ORDER BY matching_skills DESC, channel_match DESC, level_match DESC, random_score
            LIMIT 10`;
 
-        const modulesResult = await client.query(moduleQuery, moduleParams);
+          const modulesResult = await client.query(moduleQuery, moduleParams);
 
-        if (modulesResult.rows.length > 0) {
-          const roadmapResult = await client.query(
-            "INSERT INTO roadmaps (user_id, name) VALUES ($1, $2) RETURNING id",
-            [user.userId, "My Learning Path"]
-          );
-
-          const roadmapId = roadmapResult.rows[0].id;
-          const moduleIds = modulesResult.rows.map((row) => row.id);
-
-          const courseIds = await getCoursesFromModules(client, moduleIds);
-
-          if (courseIds.length > 0) {
-            await ensureUserEnrolledInCourses(client, user.userId, courseIds);
-          }
-
-          for (let i = 0; i < moduleIds.length; i++) {
-            await client.query(
-              "INSERT INTO roadmap_items (roadmap_id, module_id, position) VALUES ($1, $2, $3)",
-              [roadmapId, moduleIds[i], i + 1]
+          if (modulesResult.rows.length > 0) {
+            const roadmapResult = await client.query(
+              "INSERT INTO roadmaps (user_id, name) VALUES ($1, $2) RETURNING id",
+              [user.userId, "My Learning Path"]
             );
+
+            const roadmapId = roadmapResult.rows[0].id;
+            const moduleIds = modulesResult.rows.map((row) => row.id);
+
+            const courseIds = await getCoursesFromModules(client, moduleIds);
+
+            if (courseIds.length > 0) {
+              await ensureUserEnrolledInCourses(client, user.userId, courseIds);
+            }
+
+            for (let i = 0; i < moduleIds.length; i++) {
+              await client.query(
+                "INSERT INTO roadmap_items (roadmap_id, module_id, position) VALUES ($1, $2, $3)",
+                [roadmapId, moduleIds[i], i + 1]
+              );
+            }
           }
         }
+      } catch (roadmapError) {
+        console.error("Failed to auto-generate roadmap:", roadmapError);
       }
-    } catch (roadmapError) {
-      console.error("Failed to auto-generate roadmap:", roadmapError);
     }
 
     await client.query("COMMIT");
@@ -494,10 +498,17 @@ router.post("/responses", async (req, res) => {
       metadata: { optionIds: option_ids },
     });
 
-    res.json({
-      message: "Responses submitted successfully",
-      roadmapGenerated: true,
-    });
+    if (isAiEnabled) {
+      res.json({
+        message: "Responses submitted successfully",
+        roadmapGenerated: true,
+      });
+    } else {
+      res.json({
+        message: "Responses submitted successfully",
+        roadmapGenerated: false,
+      });
+    }
   } catch (err) {
     await client.query("ROLLBACK");
     console.error(err);
