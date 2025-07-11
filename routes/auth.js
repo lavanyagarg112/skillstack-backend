@@ -16,6 +16,11 @@ function setAuthCookie(res, payload) {
 
 router.post("/signup", async (req, res) => {
   const { email, password, firstname, lastname } = req.body;
+  if (password.length < 8) {
+    return res
+      .status(400)
+      .json({ message: "Password must be at least 8 characters long" });
+  }
   try {
     const hash = await bcrypt.hash(password, 10);
     const result = await pool.query(
@@ -64,6 +69,7 @@ router.post("/login", async (req, res) => {
       `SELECT
      o.id                    AS id,
      o.organisation_name     AS organisationname,
+      o.ai_enabled            AS ai_enabled,
      ou.role                 AS role
    FROM organisation_users ou
    JOIN organisations o
@@ -132,6 +138,7 @@ router.post("/complete-onboarding", async (req, res) => {
       `SELECT
      o.id                    AS id,
      o.organisation_name     AS organisationname,
+      o.ai_enabled            AS ai_enabled,
      ou.role                 AS role
    FROM organisation_users ou
    JOIN organisations o

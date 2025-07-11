@@ -492,6 +492,15 @@ router.post("/generate", async (req, res) => {
     return res.status(400).json({ message: "Organization required" });
   }
 
+  const isAiEnabled = user.organisation?.ai_enabled;
+  if (!isAiEnabled) {
+    return res
+      .status(403)
+      .json({
+        message: "AI roadmap generation is disabled for your organization",
+      });
+  }
+
   const client = await pool.connect();
   try {
     await client.query("BEGIN");
@@ -575,15 +584,37 @@ router.post("/generate", async (req, res) => {
       }
 
       query += ` GROUP BY mod.id, cc.channel_id, cc.level_id
-         ORDER BY matching_skills DESC, channel_match DESC, level_match DESC, random_score
+         ORDER BY mod.course_id, matching_skills DESC, channel_match DESC, level_match DESC, random_score
          LIMIT 10`; // Limit to top 10 modules
 
       const modulesResult = await client.query(query, params);
 
       if (modulesResult.rows.length > 0) {
-        const moduleIds = modulesResult.rows.map((row) => row.id);
+        const newModuleIds = modulesResult.rows.map((row) => row.id);
+        const newModuleSet = new Set(newModuleIds);
 
-        const courseIds = await getCoursesFromModules(client, moduleIds);
+        const existingRoadmapsRes = await client.query(
+          `SELECT array_agg(ri.module_id ORDER BY ri.module_id) AS modules
+     FROM roadmap_items ri
+     JOIN roadmaps r ON r.id = ri.roadmap_id
+     WHERE r.user_id = $1
+     GROUP BY ri.roadmap_id`,
+          [user.userId]
+        );
+
+        const isDuplicate = existingRoadmapsRes.rows.some(({ modules }) => {
+          if (modules.length !== newModuleIds.length) return false;
+          return modules.every((mid) => newModuleSet.has(mid));
+        });
+
+        if (isDuplicate) {
+          await client.query("ROLLBACK");
+          return res.status(409).json({
+            message: "A roadmap with the same set of modules already exists.",
+          });
+        }
+
+        const courseIds = await getCoursesFromModules(client, newModuleIds);
         enrolledCourses = await ensureUserEnrolledInCourses(
           client,
           user.userId,
@@ -594,7 +625,7 @@ router.post("/generate", async (req, res) => {
           const module = modulesResult.rows[i];
           await client.query(
             `INSERT INTO roadmap_items (roadmap_id, module_id, position)
-             VALUES ($1, $2, $3)`,
+       VALUES ($1, $2, $3)`,
             [roadmap.id, module.id, i + 1]
           );
         }
