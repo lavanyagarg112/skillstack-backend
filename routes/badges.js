@@ -54,6 +54,35 @@ router.post("/create-frequent", async (req, res) => {
 
     const badgeId = rows[0].id;
 
+    const { rows: qualified } = await client.query(
+      `SELECT user_id
+         FROM enrollments
+        WHERE status = 'completed'
+        GROUP BY user_id
+       HAVING COUNT(*) >= $1`,
+      [numCoursesCompleted]
+    );
+
+    for (const { user_id } of qualified) {
+      await client.query(
+        `INSERT INTO user_badges (user_id, badge_id)
+           VALUES ($1, $2)
+         ON CONFLICT (user_id, badge_id) DO NOTHING`,
+        [user_id, badgeId]
+      );
+      await logActivity({
+        userId: user_id,
+        organisationId,
+        action: "earn_badge",
+        metadata: { badgeId },
+        displayMetadata: {
+          name,
+          description,
+          milestone: `${numCoursesCompleted} courses`,
+        },
+      });
+    }
+
     await logActivity({
       userId,
       action: "create_badge",
@@ -129,6 +158,33 @@ router.post("/create-specific-course", async (req, res) => {
     );
 
     const badgeId = rows[0].id;
+
+    const { rows: doneUsers } = await client.query(
+      `SELECT user_id
+         FROM enrollments
+        WHERE course_id = $1
+          AND status = 'completed'`,
+      [courseId]
+    );
+
+    for (const { user_id } of doneUsers) {
+      await client.query(
+        `INSERT INTO user_badges (user_id, badge_id)
+           VALUES ($1, $2)
+         ON CONFLICT (user_id, badge_id) DO NOTHING`,
+        [user_id, badgeId]
+      );
+      await logActivity({
+        userId: user_id,
+        organisationId,
+        action: "earn_badge",
+        metadata: { badgeId, courseId },
+        displayMetadata: {
+          name,
+          "course name": courseName,
+        },
+      });
+    }
 
     await logActivity({
       userId,
