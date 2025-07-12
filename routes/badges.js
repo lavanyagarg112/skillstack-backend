@@ -2,7 +2,6 @@ const express = require("express");
 const pool = require("../database/db");
 const router = express.Router();
 const logActivity = require("./activityLogger");
-const { log } = require("console");
 
 router.post("/create-frequent", async (req, res) => {
   const { auth } = req.cookies;
