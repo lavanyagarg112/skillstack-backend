@@ -1436,7 +1436,7 @@ router.post("/complete-course", async (req, res) => {
          FROM badges
         WHERE organisation_id = $1
           AND num_courses_completed IS NOT NULL
-          AND num_courses_completed = $2`,
+          AND num_courses_completed <= $2`,
       [organisationId, numberCoursesCompleted]
     );
 
