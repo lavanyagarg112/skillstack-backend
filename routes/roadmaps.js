@@ -494,11 +494,9 @@ router.post("/generate", async (req, res) => {
 
   const isAiEnabled = user.organisation?.ai_enabled;
   if (!isAiEnabled) {
-    return res
-      .status(403)
-      .json({
-        message: "AI roadmap generation is disabled for your organization",
-      });
+    return res.status(403).json({
+      message: "AI roadmap generation is disabled for your organization",
+    });
   }
 
   const client = await pool.connect();
@@ -538,6 +536,8 @@ router.post("/generate", async (req, res) => {
     if (hasPreferences) {
       let query = `SELECT DISTINCT
            mod.id,
+           mod.course_id,
+           COALESCE(l.sort_order, 999) as level_sort_order,
            COALESCE(COUNT(DISTINCT ms.skill_id), 0) as matching_skills,
            CASE 
              WHEN cc.channel_id = ANY($2) THEN 
@@ -564,6 +564,7 @@ router.post("/generate", async (req, res) => {
          JOIN courses c ON c.id = mod.course_id
          LEFT JOIN module_skills ms ON ms.module_id = mod.id
          LEFT JOIN course_channels cc ON cc.course_id = c.id
+         LEFT JOIN levels l         ON l.id = cc.level_id
          LEFT JOIN enrollments e ON e.course_id = c.id AND e.user_id = $6
          LEFT JOIN module_status mst ON mst.module_id = mod.id AND mst.enrollment_id = e.id
          WHERE c.organisation_id = $1 
@@ -583,8 +584,8 @@ router.post("/generate", async (req, res) => {
         params.push(userSkillIds);
       }
 
-      query += ` GROUP BY mod.id, cc.channel_id, cc.level_id
-         ORDER BY mod.course_id, matching_skills DESC, channel_match DESC, level_match DESC, random_score
+      query += ` GROUP BY mod.id, cc.channel_id, cc.level_id, l.sort_order
+         ORDER BY level_sort_order ASC, mod.course_id, matching_skills DESC, channel_match DESC, level_match DESC, random_score
          LIMIT 10`; // Limit to top 10 modules
 
       const modulesResult = await client.query(query, params);
