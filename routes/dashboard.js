@@ -161,6 +161,8 @@ router.get("/admin-dashboard", async (req, res) => {
     return res.status(403).json({ message: "Forbidden" });
   }
 
+  const organisationName = user.organisation.organisationname;
+
   const client = await pool.connect();
   try {
     await client.query("BEGIN");
@@ -200,7 +202,8 @@ router.get("/admin-dashboard", async (req, res) => {
 
     await client.query("COMMIT");
     res.json({
-      welcome: `Welcome, Admin ${user.firstname}!`,
+      welcome: `Welcome, ${user.firstname}!`,
+      organisationName: organisationName,
       employees,
       enrollments,
     });
