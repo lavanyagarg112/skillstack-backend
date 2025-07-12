@@ -1,8 +1,6 @@
 const express = require("express");
 const pool = require("../database/db");
 const router = express.Router();
-const multer = require("multer");
-const path = require("path");
 
 router.get("/progress", async (req, res) => {
   const { auth } = req.cookies;
@@ -126,6 +124,15 @@ GROUP BY skill_name
     const strengths = skillPerf.filter((r) => r.pct >= 80);
     const weaknesses = skillPerf.filter((r) => r.pct < 80);
 
+    const { rows: userBadges } = await client.query(
+      `SELECT b.id, b.name, b.description, ub.awarded_at
+         FROM user_badges ub
+         JOIN badges b ON b.id = ub.badge_id
+        WHERE ub.user_id = $1
+        ORDER BY ub.awarded_at DESC`,
+      [userId]
+    );
+
     await client.query("COMMIT");
     return res.json({
       coursesDone,
@@ -133,6 +140,7 @@ GROUP BY skill_name
       quizResults,
       strengths,
       weaknesses,
+      userBadges,
     });
   } catch (err) {
     await client.query("ROLLBACK");
@@ -327,6 +335,15 @@ router.get("/overview", requireAdmin, async (req, res) => {
         const strengths = skillPerf.filter((r) => r.pct >= 80);
         const weaknesses = skillPerf.filter((r) => r.pct < 80);
 
+        const { rows: empBadges } = await client.query(
+          `SELECT b.id, b.name, b.description, ub.awarded_at
+           FROM user_badges ub
+           JOIN badges b ON b.id = ub.badge_id
+          WHERE ub.user_id = $1
+          ORDER BY ub.awarded_at DESC`,
+          [uid]
+        );
+
         return {
           id: emp.id,
           firstname: emp.firstname,
@@ -336,14 +353,33 @@ router.get("/overview", requireAdmin, async (req, res) => {
           quizResults,
           strengths,
           weaknesses,
+          badges: empBadges,
         };
       })
+    );
+
+    const { rows: badges } = await client.query(
+      `SELECT
+         b.id,
+         b.name,
+         b.description,
+         b.course_id,
+         b.num_courses_completed AS milestone,
+         COUNT(ub.user_id) AS earned_count
+       FROM badges b
+       LEFT JOIN user_badges ub
+         ON ub.badge_id = b.id
+       WHERE b.organisation_id = $1
+       GROUP BY b.id, b.name, b.description, b.course_id, b.num_courses_completed
+       ORDER BY b.name`,
+      [orgId]
     );
 
     await client.query("COMMIT");
 
     res.json({
       courses: coursesRes.rows,
+      badges,
       employees: {
         total: employees.length,
         list: employees,

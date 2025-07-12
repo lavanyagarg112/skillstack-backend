@@ -1384,6 +1384,89 @@ router.post("/complete-course", async (req, res) => {
       [userId, courseId]
     );
 
+    const { rows: courseSpecificBadges } = await client.query(
+      `SELECT id, name, description
+         FROM badges
+        WHERE organisation_id = $1
+          AND course_id = $2`,
+      [organisationId, courseId]
+    );
+
+    for (const badge of courseSpecificBadges) {
+      await client.query(
+        `INSERT INTO user_badges (user_id, badge_id)
+           VALUES ($1, $2)
+           ON CONFLICT (user_id, badge_id) DO NOTHING`,
+        [userId, badge.id]
+      );
+
+      await logActivity({
+        userId,
+        organisationId,
+        action: "earn_badge",
+        metadata: { badgeId: badge.id },
+        displayMetadata: {
+          "badge name": badge.name,
+          "course name": courseName,
+        },
+      });
+    }
+
+    const specificBadges = courseSpecificBadges.map((b) => ({
+      id: b.id,
+      name: b.name,
+      description: b.description,
+    }));
+
+    const numberCoursesCompletedRes = await client.query(
+      `SELECT COUNT(*) AS count
+          FROM enrollments
+         WHERE user_id = $1
+           AND status = 'completed'`,
+      [userId]
+    );
+
+    const numberCoursesCompleted = parseInt(
+      numberCoursesCompletedRes.rows[0].count,
+      10
+    );
+
+    const numberCoursesCompletedBadgeRes = await client.query(
+      `SELECT id, name, description, num_courses_completed
+         FROM badges
+        WHERE organisation_id = $1
+          AND num_courses_completed IS NOT NULL
+          AND num_courses_completed <= $2`,
+      [organisationId, numberCoursesCompleted]
+    );
+
+    for (const badge of numberCoursesCompletedBadgeRes.rows) {
+      await client.query(
+        `INSERT INTO user_badges (user_id, badge_id)
+           VALUES ($1, $2)
+           ON CONFLICT (user_id, badge_id) DO NOTHING`,
+        [userId, badge.id]
+      );
+
+      await logActivity({
+        userId,
+        organisationId,
+        action: "earn_badge",
+        metadata: { badgeId: badge.id },
+        displayMetadata: {
+          "badge name": badge.name,
+          "course name": courseName,
+          "courses completed": numberCoursesCompleted,
+        },
+      });
+    }
+
+    const earnedBadges = numberCoursesCompletedBadgeRes.rows.map((b) => ({
+      id: b.id,
+      name: b.name,
+      description: b.description,
+    }));
+
     await client.query("COMMIT");
     await logActivity({
       userId,
@@ -1392,7 +1475,9 @@ router.post("/complete-course", async (req, res) => {
       metadata: { courseId },
       displayMetadata: { "course name": courseName },
     });
-    return res.status(200).json({ success: true });
+    return res
+      .status(200)
+      .json({ success: true, specificBadges, earnedBadges });
   } catch (err) {
     await client.query("ROLLBACK");
     console.error("Error completing course:", err);
@@ -1441,6 +1526,34 @@ router.post("/uncomplete-course", async (req, res) => {
        WHERE user_id = $1
          AND course_id = $2`,
       [userId, courseId]
+    );
+
+    await client.query(
+      `DELETE FROM user_badges ub
+         USING badges b
+        WHERE ub.badge_id = b.id
+          AND ub.user_id = $1
+          AND b.course_id = $2`,
+      [userId, courseId]
+    );
+
+    const { rows: cntRows } = await client.query(
+      `SELECT COUNT(*)::int AS completed_count
+         FROM enrollments
+        WHERE user_id = $1
+          AND status = 'completed'`,
+      [userId]
+    );
+    const newCount = cntRows[0].completed_count;
+
+    await client.query(
+      `DELETE FROM user_badges ub
+         USING badges b
+        WHERE ub.badge_id = b.id
+          AND ub.user_id = $1
+          AND b.num_courses_completed IS NOT NULL
+          AND b.num_courses_completed > $2`,
+      [userId, newCount]
     );
 
     await client.query("COMMIT");
