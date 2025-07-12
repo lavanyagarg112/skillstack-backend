@@ -166,10 +166,10 @@ router.get("/created-badges", async (req, res) => {
   if (!organisationId) {
     return res.status(400).json({ message: "Organization required" });
   }
-  const organisationRole = session.organisation?.role;
-  if (organisationRole !== "admin") {
-    return res.status(403).json({ message: "Forbidden" });
-  }
+  //   const organisationRole = session.organisation?.role;
+  //   if (organisationRole !== "admin") {
+  //     return res.status(403).json({ message: "Forbidden" });
+  //   }
 
   const client = await pool.connect();
   try {

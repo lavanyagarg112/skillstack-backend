@@ -18,6 +18,8 @@ router.get("/user-dashboard", async (req, res) => {
     return res.status(401).json({ message: "Not logged in" });
   }
 
+  const organisationName = user.organisation.organisationname;
+
   const client = await pool.connect();
   try {
     await client.query("BEGIN");
@@ -136,6 +138,7 @@ WHERE e.user_id = $1`,
     await client.query("COMMIT");
     res.json({
       welcome: `Welcome, ${user.firstname}!`,
+      organisationName: organisationName,
       currentCourse,
       currentModule,
       nextToLearn,
