@@ -18,7 +18,7 @@ CREATE TABLE organisations (
   admin_user_id       INTEGER         UNIQUE NOT NULL
     REFERENCES users(id) ON DELETE NO ACTION,
   description         TEXT            NOT NULL DEFAULT '',
-  ai_enabled          BOOLEAN         NOT NULL DEFAULT FALSE,
+  ai_enabled          BOOLEAN         NOT NULL DEFAULT TRUE,
   current_invitation_id TEXT UNIQUE,
   created_at          TIMESTAMPTZ     NOT NULL DEFAULT now(),
   UNIQUE(organisation_name, admin_user_id)
@@ -341,6 +341,25 @@ CREATE TABLE chat_logs (
   question      TEXT NOT NULL,
   answer        TEXT NOT NULL,
   created_at    TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE TABLE badges (
+  id            SERIAL PRIMARY KEY,
+  name          VARCHAR(100) NOT NULL,
+  description   TEXT,
+  num_courses_completed INTEGER NOT NULL DEFAULT 0,
+  image_url     TEXT,
+  organisation_id INTEGER NOT NULL REFERENCES organisations(id) ON DELETE CASCADE,
+  created_at    TIMESTAMPTZ NOT NULL DEFAULT now(),
+  course_id    INTEGER REFERENCES courses(id) ON DELETE CASCADE,
+  UNIQUE(name, organisation_id)
+);
+
+CREATE TABLE user_badges (
+  user_id       INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  badge_id      INTEGER NOT NULL REFERENCES badges(id) ON DELETE CASCADE,
+  awarded_at    TIMESTAMPTZ NOT NULL DEFAULT now(),
+  PRIMARY KEY(user_id, badge_id)
 );
 
 
