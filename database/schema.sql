@@ -18,7 +18,7 @@ CREATE TABLE organisations (
   admin_user_id       INTEGER         UNIQUE NOT NULL
     REFERENCES users(id) ON DELETE NO ACTION,
   description         TEXT            NOT NULL DEFAULT '',
-  ai_enabled          BOOLEAN         NOT NULL DEFAULT TRUE,
+  ai_enabled          BOOLEAN         NOT NULL DEFAULT FALSE,
   current_invitation_id TEXT UNIQUE,
   created_at          TIMESTAMPTZ     NOT NULL DEFAULT now(),
   UNIQUE(organisation_name, admin_user_id)
