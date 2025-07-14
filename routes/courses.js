@@ -1733,7 +1733,17 @@ async function gradeQuizResponse(client, responseId) {
     }
   }
 
+  const questionNamesRes = await client.query(
+    `SELECT id, question_text
+       FROM questions
+      WHERE id = ANY($1)`,
+    [questionIds]
+  );
+
   return userAnswers.map(({ question_id, selected_option_ids }) => {
+    const questionText = questionNamesRes.rows.find(
+      (q) => q.id === question_id
+    )?.question_text;
     const correctIds = correctMap[question_id] || [];
     const selectedIds = selected_option_ids || [];
 
@@ -1752,6 +1762,7 @@ async function gradeQuizResponse(client, responseId) {
 
     return {
       questionId: question_id,
+      questionText,
       correctOptions,
       selectedOptions,
       isCorrect,
