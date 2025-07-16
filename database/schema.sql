@@ -97,18 +97,18 @@ CREATE TABLE revisions (
 
 
 -- 6. MATERIALS & SKILLS
-CREATE TABLE materials (
-  id            SERIAL PRIMARY KEY,
-  revision_id   INTEGER    NOT NULL
-    REFERENCES revisions(id) ON DELETE CASCADE,
-  type          VARCHAR(50) NOT NULL,     -- 'video','pdf','slide',...
-  file_url      TEXT        NOT NULL,     -- S3/Cloud URL
-  uploaded_by   INTEGER
-    REFERENCES users(id) ON DELETE SET NULL,
-  upload_date   TIMESTAMPTZ NOT NULL DEFAULT now(),
-  due_date      TIMESTAMPTZ,
-  status        VARCHAR(50) NOT NULL DEFAULT 'active'
-);
+-- CREATE TABLE materials ( -- Not used
+--   id            SERIAL PRIMARY KEY,
+--   revision_id   INTEGER    NOT NULL
+--     REFERENCES revisions(id) ON DELETE CASCADE,
+--   type          VARCHAR(50) NOT NULL,     -- 'video','pdf','slide',...
+--   file_url      TEXT        NOT NULL,     -- S3/Cloud URL
+--   uploaded_by   INTEGER
+--     REFERENCES users(id) ON DELETE SET NULL,
+--   upload_date   TIMESTAMPTZ NOT NULL DEFAULT now(),
+--   due_date      TIMESTAMPTZ,
+--   status        VARCHAR(50) NOT NULL DEFAULT 'active'
+-- );
 
 CREATE TABLE skills (
   id              SERIAL PRIMARY KEY,
@@ -119,13 +119,13 @@ CREATE TABLE skills (
   UNIQUE(name, organisation_id)
 );
 
-CREATE TABLE material_skills (
-  material_id INTEGER NOT NULL
-    REFERENCES materials(id) ON DELETE CASCADE,
-  skill_id    INTEGER NOT NULL
-    REFERENCES skills(id) ON DELETE CASCADE,
-  PRIMARY KEY(material_id, skill_id)
-);
+-- CREATE TABLE material_skills ( -- Not used
+--   material_id INTEGER NOT NULL
+--     REFERENCES materials(id) ON DELETE CASCADE,
+--   skill_id    INTEGER NOT NULL
+--     REFERENCES skills(id) ON DELETE CASCADE,
+--   PRIMARY KEY(material_id, skill_id)
+-- );
 
 
 -- 7. QUIZZES, QUESTIONS, OPTIONS & RESPONSES
@@ -236,15 +236,15 @@ CREATE TABLE leaderboards (
   created_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
-CREATE TABLE leaderboard_entries (
-  leaderboard_id INTEGER NOT NULL
-    REFERENCES leaderboards(id) ON DELETE CASCADE,
-  user_id        INTEGER NOT NULL
-    REFERENCES users(id) ON DELETE CASCADE,
-  position       INTEGER NOT NULL,
-  points         INTEGER NOT NULL DEFAULT 0,
-  PRIMARY KEY(leaderboard_id, user_id)
-);
+-- CREATE TABLE leaderboard_entries ( -- Not used
+--   leaderboard_id INTEGER NOT NULL
+--     REFERENCES leaderboards(id) ON DELETE CASCADE,
+--   user_id        INTEGER NOT NULL
+--     REFERENCES users(id) ON DELETE CASCADE,
+--   position       INTEGER NOT NULL,
+--   points         INTEGER NOT NULL DEFAULT 0,
+--   PRIMARY KEY(leaderboard_id, user_id)
+-- );
 
 
 -- 11. ROADMAPS
