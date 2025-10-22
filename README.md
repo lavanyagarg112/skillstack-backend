@@ -1,5 +1,7 @@
 This is the backend for skillstack platform.
 
+Link to frontend repository: [SkillStack](https://github.com/lavanyagarg112/skillstack)
+
 ## Setup Instructions
 
 1. Clone this repository:
